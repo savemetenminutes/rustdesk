@@ -358,10 +358,17 @@ pub mod client {
 
         let keyboard_mode = get_keyboard_mode_enum(keyboard_mode);
         if is_long_press(&event) {
+            log::debug!("[kbd] {:?}: long press of a held modifier, not sent", event.event_type);
             return;
         }
         let peer = get_peer_platform().to_lowercase();
-        for key_event in event_to_key_events(peer, &event, keyboard_mode, lock_modes) {
+        let key_events = event_to_key_events(peer, &event, keyboard_mode, lock_modes);
+        log::debug!(
+            "[kbd] {:?}: {} key event(s) sent",
+            event.event_type,
+            key_events.len()
+        );
+        for key_event in key_events {
             send_key_event(&key_event);
         }
     }
@@ -693,6 +700,20 @@ fn start_grab_loop() {
             #[cfg(not(all(feature = "flutter", target_os = "windows")))]
             let excluded: Option<Option<Event>> = None;
 
+            if KEYBOARD_HOOKED.load(Ordering::SeqCst) || excluded.is_some() {
+                log::debug!(
+                    "[kbd] {:?} press={} pos=0x{:x} hooked={} exclude={}",
+                    key,
+                    is_press,
+                    event.position_code,
+                    KEYBOARD_HOOKED.load(Ordering::SeqCst),
+                    match &excluded {
+                        None => "default",
+                        Some(None) => "swallowed",
+                        Some(Some(_)) => "local-only",
+                    }
+                );
+            }
             let res = if let Some(res) = excluded {
                 res
             } else if KEYBOARD_HOOKED.load(Ordering::SeqCst) {
@@ -1071,6 +1092,8 @@ pub fn send_key_event(key_event: &KeyEvent) {
     #[cfg(feature = "flutter")]
     if let Some(session) = flutter::get_cur_session() {
         session.send_key_event(key_event);
+    } else {
+        log::debug!("[kbd] no current session: key event dropped");
     }
 }
 

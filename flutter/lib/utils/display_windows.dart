@@ -219,6 +219,10 @@ void displayWindowsLog(String message) {
   } catch (_) {}
 }
 
+String _r(Rect? r) => r == null
+    ? 'null'
+    : '${r.left.toStringAsFixed(0)},${r.top.toStringAsFixed(0)} ${r.width.toStringAsFixed(0)}x${r.height.toStringAsFixed(0)}';
+
 Rect? _screenContaining(List<window_size.Screen> screens, Offset point) {
   for (final s in screens) {
     if (s.frame.contains(point)) {
@@ -265,8 +269,8 @@ Future<void> applyDisplayWindowState(
     isFullscreen = false;
   }
   displayWindowsLog('apply target=$windowId state=${state == null ? null : jsonEncode(state.toJson())} '
-      'targetExists=$targetExists frame=$frame max=$isMaximized fs=$isFullscreen '
-      'screens=${screens.map((s) => s.frame).toList()}');
+      'targetExists=$targetExists frame=${_r(frame)} max=$isMaximized fs=$isFullscreen '
+      'screens=${screens.map((s) => _r(s.frame)).toList()}');
   final wc = WindowController.fromWindowId(windowId);
   if (windowId == kWindowId && stateGlobal.fullscreen.isTrue && !isFullscreen) {
     stateGlobal.setFullscreen(false);
@@ -397,8 +401,8 @@ Future<void> reportDisplayWindowNow() async {
         _screenContaining(screens, frame.center) ??
         _screenContaining(screens, current.center);
     displayWindowsLog(
-        'report window=$windowId peer=$peerId display=$display frame=$frame screen=$screen '
-        'max=$isMaximized fs=$isFullscreen current=$current style=${session.viewStyle} '
+        'report window=$windowId peer=$peerId display=$display frame=${_r(frame)} screen=${_r(screen)} '
+        'max=$isMaximized fs=$isFullscreen current=${_r(current)} style=${session.viewStyle} '
         'scale=${session.customScalePercent} scroll=${session.scrollX},${session.scrollY}');
     final state = DisplayWindowState(frame, screen, isMaximized, isFullscreen,
         viewStyle: session.viewStyle ?? stored?.viewStyle,

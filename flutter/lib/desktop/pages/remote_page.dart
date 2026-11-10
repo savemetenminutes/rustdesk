@@ -568,6 +568,7 @@ class _RemotePageState extends State<RemotePage>
   @override
   void onWindowRestore() {
     super.onWindowRestore();
+    reportDisplayWindowSoon();
     // On windows, we use `onWindowRestore` way to handle window restore from
     // a minimized state.
     if (isWindows) {
@@ -582,6 +583,7 @@ class _RemotePageState extends State<RemotePage>
   @override
   void onWindowMaximize() {
     super.onWindowMaximize();
+    reportDisplayWindowSoon();
     WakelockManager.enable(_uniqueKey);
     // Update pointer lock center when window is maximized
     _updatePointerLockCenterIfNeeded();
@@ -590,6 +592,9 @@ class _RemotePageState extends State<RemotePage>
   @override
   void onWindowResize() {
     super.onWindowResize();
+    // Sub windows get move/resize from `MultiWindowListener` (`onWindowMove` / `onWindowResize`); the
+    // `WindowListener` callbacks `onWindowMoved` / `onWindowResized` of `DesktopTab` fire for the main window only.
+    reportDisplayWindowSoon();
     // Update pointer lock center when window is resized
     _updatePointerLockCenterIfNeeded();
   }
@@ -597,6 +602,7 @@ class _RemotePageState extends State<RemotePage>
   @override
   void onWindowMove() {
     super.onWindowMove();
+    reportDisplayWindowSoon();
     // Update pointer lock center when window is moved
     _updatePointerLockCenterIfNeeded();
   }
@@ -639,6 +645,7 @@ class _RemotePageState extends State<RemotePage>
   @override
   void onWindowEnterFullScreen() {
     super.onWindowEnterFullScreen();
+    reportDisplayWindowSoon();
     if (isMacOS) {
       stateGlobal.setFullscreen(true);
       _queueMacOSKeyboardAfterFullScreen();
@@ -648,6 +655,7 @@ class _RemotePageState extends State<RemotePage>
   @override
   void onWindowLeaveFullScreen() {
     super.onWindowLeaveFullScreen();
+    reportDisplayWindowSoon();
     if (isMacOS) {
       stateGlobal.setFullscreen(false);
       _queueMacOSKeyboardAfterFullScreen();

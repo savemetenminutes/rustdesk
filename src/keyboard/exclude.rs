@@ -489,7 +489,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
             key: Some(key),
         };
         if !cur_exclude_list().contains(&chord) {
-            return None;
+            return probe_next_hooks(&mut state, event, true);
         }
         let mode = super::get_keyboard_mode();
         release_remote_mods(&mode, &state);
@@ -529,7 +529,68 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
     }
 
     reset(&mut *state);
+    if is_press {
+        // A modifier press: the hooks behind this one track modifier state from it.
+        return probe_next_hooks(&mut state, event, false);
+    }
     None
+}
+
+/// Hands a press that the grabbed session would take to the keyboard hooks installed before this one
+/// (`CallNextHookEx`, e.g. AutoHotkey), before deciding.
+///
+/// - A hook swallowed it (a hotkey fired): the press MUST NOT reach the remote PC; for a non-modifier key the
+///   modifiers held for the hotkey are released there (masked), so the text the hotkey types arrives unmodified. The
+///   hotkey's own output is injected input, which passes this hook like any key and reaches the remote PC.
+/// - No hook swallowed it: the default path (sent to the remote PC, swallowed locally).
+///
+/// The press is handed on here, inside this hook procedure, with the `KBDLLHOOKSTRUCT` rebuilt from `event`; the
+/// return value MUST then be `Some(None)` or the default path's `None` for a press, both of which make rdev return
+/// without calling the next hook a second time.
+#[cfg(target_os = "windows")]
+fn probe_next_hooks(state: &mut HookState, event: &Event, is_main_key: bool) -> Option<Option<Event>> {
+    use winapi::um::winuser::{CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_SYSKEYDOWN};
+    let alt = state.held.keys().any(|k| matches!(k, Key::Alt | Key::AltGr));
+    let ctrl = state
+        .held
+        .keys()
+        .any(|k| matches!(k, Key::ControlLeft | Key::ControlRight));
+    let pos = event.position_code;
+    let mut flags = 0u32;
+    if (pos >> 8) == 0xE0 {
+        flags |= 0x01; // LLKHF_EXTENDED
+    }
+    if alt {
+        flags |= 0x20; // LLKHF_ALTDOWN
+    }
+    let mut data = KBDLLHOOKSTRUCT {
+        vkCode: event.platform_code,
+        scanCode: pos & 0xFF,
+        flags,
+        time: 0,
+        dwExtraInfo: event.extra_data,
+    };
+    let msg = if alt && !ctrl { WM_SYSKEYDOWN } else { WM_KEYDOWN };
+    let suppressed = unsafe {
+        CallNextHookEx(
+            std::ptr::null_mut(),
+            HC_ACTION,
+            msg as usize,
+            &mut data as *mut KBDLLHOOKSTRUCT as isize,
+        )
+    } != 0;
+    if !suppressed {
+        return None;
+    }
+    hbb_common::log::debug!(
+        "[kbd] vk=0x{:x} pos=0x{:x}: swallowed by a later keyboard hook (hotkey), not sent",
+        event.platform_code,
+        pos
+    );
+    if is_main_key {
+        release_remote_mods(&super::get_keyboard_mode(), state);
+    }
+    Some(None)
 }
 
 #[cfg(test)]

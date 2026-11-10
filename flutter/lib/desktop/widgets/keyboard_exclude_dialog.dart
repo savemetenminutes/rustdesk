@@ -3,6 +3,8 @@
 // Every shortcut is sent to the remote PC by default. A preset left unchecked, and every custom chord added here, is
 // excluded: while a session window has the keyboard, the chord goes to the local PC.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/models/model.dart';
@@ -51,34 +53,60 @@ void keyboardExcludeShortcutsDialog(FFI ffi) async {
   final excluded = _parseList(raw);
   final custom =
       excluded.where((e) => !kKeyboardShortcutPresets.contains(e)).toList();
-  final controller = TextEditingController();
-  String? error;
+  var recording = false;
+  Timer? poll;
+  DateTime? recordingSince;
+
+  void stopRecording() {
+    poll?.cancel();
+    poll = null;
+    if (recording) {
+      bind.mainStopKeyboardShortcutRecording();
+    }
+    recording = false;
+  }
 
   ffi.dialogManager.show((setState, close, context) {
-    void add() {
-      final chord =
-          bind.mainNormalizeKeyboardShortcut(chord: controller.text.trim());
-      if (chord.isEmpty) {
-        setState(() => error = 'Not a valid shortcut');
-        return;
+    void add(String chord) {
+      if (chord.isEmpty) return;
+      if (!excluded.contains(chord)) {
+        excluded.add(chord);
       }
-      setState(() {
-        error = null;
-        if (!excluded.contains(chord)) {
-          excluded.add(chord);
+      if (!kKeyboardShortcutPresets.contains(chord) &&
+          !custom.contains(chord)) {
+        custom.add(chord);
+      }
+    }
+
+    // The keyboard hook records the next chord exclusively: no key event reaches another keyboard hook
+    // (e.g. AutoHotkey) or this dialog until a chord is complete.
+    void startRecording() {
+      bind.mainStartKeyboardShortcutRecording();
+      recordingSince = DateTime.now();
+      setState(() => recording = true);
+      poll = Timer.periodic(const Duration(milliseconds: 50), (_) {
+        final chord = bind.mainTakeRecordedKeyboardShortcut();
+        final timedOut =
+            DateTime.now().difference(recordingSince!).inSeconds >= 15;
+        if (chord.isEmpty && !timedOut) return;
+        stopRecording();
+        try {
+          setState(() => add(chord));
+        } catch (_) {
+          // The dialog was dismissed by `dialogManager`.
         }
-        if (!kKeyboardShortcutPresets.contains(chord) &&
-            !custom.contains(chord)) {
-          custom.add(chord);
-        }
-        controller.clear();
       });
+    }
+
+    void onClose() {
+      stopRecording();
+      close();
     }
 
     Future<void> submit() async {
       await bind.sessionSetKeyboardExcludeShortcuts(
           sessionId: sessionId, value: excluded.join(','));
-      close();
+      onClose();
     }
 
     return CustomAlertDialog(
@@ -124,16 +152,18 @@ void keyboardExcludeShortcutsDialog(FFI ffi) async {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: controller,
-                    decoration: InputDecoration(
-                      hintText: 'Keep on this PC, e.g. Ctrl+Alt+F12',
-                      errorText: error,
-                    ),
-                    onSubmitted: (_) => add(),
-                  ),
+                  child: Text(recording
+                      ? 'Press the shortcut to keep on this PC...'
+                      : 'Add a shortcut to keep on this PC'),
                 ),
-                IconButton(icon: const Icon(Icons.add), onPressed: add),
+                dialogButton(recording ? 'Cancel' : 'Record',
+                    icon: Icon(recording
+                        ? Icons.stop_rounded
+                        : Icons.fiber_manual_record),
+                    onPressed: recording
+                        ? () => setState(() => stopRecording())
+                        : startRecording,
+                    isOutline: true),
               ],
             ),
           ],
@@ -142,13 +172,13 @@ void keyboardExcludeShortcutsDialog(FFI ffi) async {
       actions: [
         dialogButton('Cancel',
             icon: const Icon(Icons.close_rounded),
-            onPressed: close,
+            onPressed: onClose,
             isOutline: true),
         dialogButton('OK',
             icon: const Icon(Icons.done_rounded), onPressed: submit),
       ],
-      onSubmit: submit,
-      onCancel: close,
+      onSubmit: recording ? null : submit,
+      onCancel: recording ? null : onClose,
     );
   });
 }

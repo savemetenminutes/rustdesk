@@ -16,7 +16,10 @@ use super::client;
 use rdev::{Event, EventType, Key};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::SystemTime,
 };
 
@@ -191,6 +194,7 @@ lazy_static::lazy_static! {
     /// Peer id → exclude list. Filled from the peer option on first use and by `set_exclude_list()`.
     static ref EXCLUDE_LISTS: Mutex<HashMap<String, Vec<Chord>>> = Mutex::new(HashMap::new());
     static ref STATE: Mutex<HookState> = Mutex::new(HookState::default());
+    static ref RECORDED: Mutex<String> = Mutex::new(String::new());
 }
 
 /// Stores `value` as the exclude list of the peer of `session` (peer option and cache) and returns the canonical form.
@@ -239,6 +243,26 @@ struct HookState {
     diverted: bool,
     /// Events re-injected by this module, expected back in the hook: `(position_code, is_press)`.
     expected: VecDeque<(u32, bool)>,
+    /// Scan codes of presses swallowed while recording; their releases are swallowed too.
+    recorded_presses: std::collections::HashSet<u32>,
+}
+
+/// While true, the keyboard hook records the next chord into `RECORDED` and swallows every key event.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+/// Starts recording a chord; `take_recorded_chord()` returns it once pressed.
+pub fn start_recording() {
+    RECORDED.lock().unwrap().clear();
+    RECORDING.store(true, Ordering::SeqCst);
+}
+
+pub fn stop_recording() {
+    RECORDING.store(false, Ordering::SeqCst);
+}
+
+/// The recorded chord in canonical form, or "" while none was recorded; clears it.
+pub fn take_recorded_chord() -> String {
+    std::mem::take(&mut *RECORDED.lock().unwrap())
 }
 
 impl HookState {
@@ -343,6 +367,48 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
             state.diverted = false;
         }
     };
+
+    // Recording: every press is swallowed (so no other keyboard hook or window sees it), and so is the release of
+    // every press swallowed here.
+    if !RECORDING.load(Ordering::SeqCst)
+        && !is_press
+        && state.recorded_presses.remove(&event.position_code)
+    {
+        reset(&mut *state);
+        return Some(None);
+    }
+    if RECORDING.load(Ordering::SeqCst) {
+        if !is_press {
+            state.recorded_presses.remove(&event.position_code);
+        }
+        // The fake left `Ctrl` of `AltGr` (`bit == 0`, `mod_bit(key) != 0`) and keys without a name in `KEY_NAMES`
+        // complete no chord.
+        let chord = if is_press
+            && mod_bit(key) == 0
+            && KEY_NAMES.iter().any(|(_, k)| *k == key)
+        {
+            Some(Chord {
+                mods: held_bits_before,
+                key: Some(key),
+            })
+        } else if first_release && !state.seq_other && held_bits_before == state.seq_mods {
+            Some(Chord {
+                mods: state.seq_mods,
+                key: None,
+            })
+        } else {
+            None
+        };
+        if is_press {
+            state.recorded_presses.insert(event.position_code);
+        }
+        if let Some(chord) = chord {
+            *RECORDED.lock().unwrap() = chord.to_canonical();
+            RECORDING.store(false, Ordering::SeqCst);
+        }
+        reset(&mut *state);
+        return Some(None);
+    }
 
     if !hooked {
         reset(&mut *state);

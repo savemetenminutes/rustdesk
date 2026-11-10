@@ -16,6 +16,7 @@ import 'package:flutter_hbb/desktop/widgets/material_mod_popup_menu.dart'
     as mod_menu;
 import 'package:flutter_hbb/desktop/widgets/popup_menu.dart';
 import 'package:flutter_hbb/utils/display_windows.dart';
+import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
@@ -66,11 +67,22 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     _display = display as int?;
     _isMovedTab = tabWindowId != null && display == null;
     registerDisplayWindowSessions(() => tabController.state.value.tabs
-        .where((tab) => tab.page is RemotePage)
-        .map((tab) => (tab.key, (tab.page as RemotePage).ffi.ffiModel.pi))
-        .where((e) => e.$2.isSet.value)
-        .map((e) => (e.$1, e.$2.currentDisplay))
-        .toList());
+            .where((tab) => tab.page is RemotePage)
+            .map((tab) => (tab.key, (tab.page as RemotePage).ffi))
+            .where((e) => e.$2.ffiModel.pi.isSet.value)
+            .map((e) {
+          final ffi = e.$2;
+          final key = ffi.sessionId.toString();
+          final c = ffi.canvasModel;
+          return DisplayWindowSession(e.$1, ffi.ffiModel.pi.currentDisplay,
+              viewStyle: windowViewStyles[key],
+              customScalePercent: windowCustomScalePercents[key],
+              scrollX: c.scrollHorizontal.hasClients
+                  ? c.scrollHorizontal.offset
+                  : null,
+              scrollY:
+                  c.scrollVertical.hasClients ? c.scrollVertical.offset : null);
+        }).toList());
     stateGlobal.fullscreen.listen((_) => reportDisplayWindowSoon());
     tryMoveToScreenAndSetFullscreen(screenRect);
     if (peerId != null) {

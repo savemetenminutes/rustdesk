@@ -39,8 +39,17 @@ class DisplayWindowState {
   final bool isMaximized;
   final bool isFullscreen;
 
+  /// View style of the window (`kRemoteViewStyleOriginal` / `Adaptive` / `Custom`) and its custom scale percent.
+  final String? viewStyle;
+  final int? customScalePercent;
+
+  /// Scroll offsets in pixels (scrollbar / edge scroll modes).
+  final double? scrollX;
+  final double? scrollY;
+
   DisplayWindowState(
-      this.frame, this.screen, this.isMaximized, this.isFullscreen);
+      this.frame, this.screen, this.isMaximized, this.isFullscreen,
+      {this.viewStyle, this.customScalePercent, this.scrollX, this.scrollY});
 
   Map<String, dynamic> toJson() => {
         'l': frame.left,
@@ -56,6 +65,10 @@ class DisplayWindowState {
           },
         'isMaximized': isMaximized,
         'isFullscreen': isFullscreen,
+        if (viewStyle != null) 'viewStyle': viewStyle,
+        if (customScalePercent != null) 'customScalePercent': customScalePercent,
+        if (scrollX != null) 'scrollX': scrollX,
+        if (scrollY != null) 'scrollY': scrollY,
       };
 
   static DisplayWindowState? fromJson(dynamic m) {
@@ -73,6 +86,10 @@ class DisplayWindowState {
                 (s['b'] as num).toDouble()),
         m['isMaximized'] == true,
         m['isFullscreen'] == true,
+        viewStyle: m['viewStyle'] as String?,
+        customScalePercent: (m['customScalePercent'] as num?)?.toInt(),
+        scrollX: (m['scrollX'] as num?)?.toDouble(),
+        scrollY: (m['scrollY'] as num?)?.toDouble(),
       );
     } catch (e) {
       debugPrint('Failed to parse DisplayWindowState $m: $e');
@@ -227,8 +244,20 @@ Future<void> applyDisplayWindowState(
   });
 }
 
-/// Returns `(peerId, display)` of every remote session shown in the current window.
-typedef DisplayWindowSessions = List<(String, int)> Function();
+/// One remote session shown in the current window.
+class DisplayWindowSession {
+  final String peerId;
+  final int display;
+  final String? viewStyle;
+  final int? customScalePercent;
+  final double? scrollX;
+  final double? scrollY;
+  DisplayWindowSession(this.peerId, this.display,
+      {this.viewStyle, this.customScalePercent, this.scrollX, this.scrollY});
+}
+
+/// Returns every remote session shown in the current window.
+typedef DisplayWindowSessions = List<DisplayWindowSession> Function();
 
 DisplayWindowSessions? _sessions;
 bool _armed = false;
@@ -296,13 +325,19 @@ Future<void> reportDisplayWindowNow() async {
   } catch (e) {
     debugPrint('Failed to get the screen list: $e');
   }
-  for (final (peerId, display) in _sessions!()) {
-    final frame =
-        _normalFrame ?? loadDisplayWindows(peerId)[display]?.frame ?? current;
+  for (final session in _sessions!()) {
+    final peerId = session.peerId;
+    final display = session.display;
+    final stored = loadDisplayWindows(peerId)[display];
+    final frame = _normalFrame ?? stored?.frame ?? current;
     final screen = _screenContaining(screens, frame.center) ??
         _screenContaining(screens, current.center);
-    final state =
-        DisplayWindowState(frame, screen, isMaximized, isFullscreen);
+    final state = DisplayWindowState(frame, screen, isMaximized, isFullscreen,
+        viewStyle: session.viewStyle ?? stored?.viewStyle,
+        customScalePercent:
+            session.customScalePercent ?? stored?.customScalePercent,
+        scrollX: session.scrollX ?? stored?.scrollX,
+        scrollY: session.scrollY ?? stored?.scrollY);
     await DesktopMultiWindow.invokeMethod(
         kMainWindowId,
         kWindowEventSaveDisplayWindow,

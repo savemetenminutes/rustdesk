@@ -1508,7 +1508,39 @@ class FfiModel with ChangeNotifier {
       tryUseAllMyDisplaysForTheRemoteSession(peerId);
     }
     if (isDesktop && connType == ConnType.defaultConn) {
+      // `tryUseAllMyDisplaysForTheRemoteSession()` has switched this window to its display before its first await.
+      _initWindowView(peerId);
       armDisplayWindowReports();
+    }
+  }
+
+  bool _windowViewInitialized = false;
+
+  /// Pins this window's view style and custom scale (`windowViewStyles`, `windowCustomScalePercents`) to the stored
+  /// state of its display (`loadDisplayWindows()`), else to the peer's current values, and restores the stored scroll
+  /// offsets. Runs once per session.
+  Future<void> _initWindowView(String peerId) async {
+    if (_windowViewInitialized) {
+      return;
+    }
+    _windowViewInitialized = true;
+    final ffi = parent.target;
+    if (ffi == null) {
+      return;
+    }
+    final key = sessionId.toString();
+    final stored = loadDisplayWindows(peerId)[_pi.currentDisplay];
+    final style =
+        stored?.viewStyle ?? await bind.sessionGetViewStyle(sessionId: sessionId);
+    if (style != null && style.isNotEmpty) {
+      windowViewStyles[key] = style;
+    }
+    windowCustomScalePercents[key] = stored?.customScalePercent ??
+        parseCustomScalePercent(await bind.sessionGetFlutterOption(
+            sessionId: sessionId, k: kCustomScalePercentKey));
+    await ffi.canvasModel.updateViewStyle();
+    if (stored?.scrollX != null || stored?.scrollY != null) {
+      ffi.canvasModel.restoreScrollOffset(stored!.scrollX, stored.scrollY);
     }
   }
 
@@ -2385,6 +2417,29 @@ class CanvasModel with ChangeNotifier {
     }
   }
 
+  /// Jumps the scroll controllers to the pixel offsets `x` / `y` once the scrollbars are attached (checked every
+  /// 200 ms for up to 10 s; scroll-auto mode attaches none).
+  void restoreScrollOffset(double? x, double? y) {
+    var tries = 0;
+    Timer.periodic(const Duration(milliseconds: 200), (t) {
+      tries++;
+      if (_horizontal.hasClients || _vertical.hasClients) {
+        t.cancel();
+        if (x != null && _horizontal.hasClients) {
+          _horizontal
+              .jumpTo(x.clamp(0.0, _horizontal.position.maxScrollExtent));
+        }
+        if (y != null && _vertical.hasClients) {
+          _vertical.jumpTo(y.clamp(0.0, _vertical.position.maxScrollExtent));
+        }
+        updateScrollPercent();
+        notifyListeners();
+      } else if (tries >= 50) {
+        t.cancel();
+      }
+    });
+  }
+
   ScrollController get scrollHorizontal => _horizontal;
   ScrollController get scrollVertical => _vertical;
   double get scrollX => _scrollX;
@@ -2447,7 +2502,7 @@ class CanvasModel with ChangeNotifier {
   updateSize() => _size = getSize();
 
   updateViewStyle({refreshMousePos = true, notify = true}) async {
-    final style = await bind.sessionGetViewStyle(sessionId: sessionId);
+    final style = await getSessionViewStyle(sessionId);
     if (style == null) {
       return;
     }
@@ -2522,7 +2577,7 @@ class CanvasModel with ChangeNotifier {
 
   tryUpdateScrollStyle(Duration duration, String? style) async {
     if (_scrollStyle == ScrollStyle.scrollauto) return;
-    style ??= await bind.sessionGetViewStyle(sessionId: sessionId);
+    style ??= await getSessionViewStyle(sessionId);
     if (style != kRemoteViewStyleOriginal && style != kRemoteViewStyleCustom) {
       return;
     }
@@ -2768,6 +2823,7 @@ class CanvasModel with ChangeNotifier {
 
     setScrollPercent(scrollPixelPercent.x, scrollPixelPercent.y);
     pushScrollPositionToUI(scrollPixel.x, scrollPixel.y);
+    reportDisplayWindowSoon();
 
     notifyListeners();
   }
@@ -2827,7 +2883,7 @@ class CanvasModel with ChangeNotifier {
       _scale = 1.0 / _devicePixelRatio;
     }
     _resetCanvasOffset(getDisplayWidth(), getDisplayHeight());
-    bind.sessionSetViewStyle(sessionId: sessionId, value: _lastViewStyle.style);
+    setSessionViewStyle(sessionId, _lastViewStyle.style);
     notifyListeners();
   }
 

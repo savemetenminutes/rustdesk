@@ -20,6 +20,7 @@ import '../../models/platform_model.dart';
 import '../../models/shortcut_model.dart';
 import '../../common/shared_state.dart';
 import '../../utils/image.dart';
+import '../../utils/display_windows.dart';
 import '../widgets/remote_toolbar.dart';
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
@@ -1171,6 +1172,7 @@ class _ImagePaintState extends State<ImagePaint> {
       return NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             c.updateScrollPercent();
+            reportDisplayWindowSoon();
             return false;
           },
           child: mouseRegion(

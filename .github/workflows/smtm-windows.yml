@@ -120,6 +120,10 @@ jobs:
     name: ${{ matrix.job.target }}
     needs: [build-RustDeskTempTopMostWindow, generate-bridge]
     runs-on: ${{ matrix.job.os }}
+    permissions:
+      contents: write
+    # "Publish Release" (softprops/action-gh-release) creates the `TAG_NAME` release and uploads to it; a fork's
+    # default `GITHUB_TOKEN` is read-only.
     strategy:
       fail-fast: false
       matrix:

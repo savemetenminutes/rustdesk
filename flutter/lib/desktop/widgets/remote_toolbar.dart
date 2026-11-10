@@ -3786,8 +3786,15 @@ class _AudioDevicesMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _IconMenuButton(
-      icon: Icon(Icons.volume_up,
-          color: Colors.white, size: _ToolbarTheme.buttonSize * 0.75),
+      // Same footprint as the SVG icons: a `buttonSize` square (the blue `Ink` tile) with a ~20 px glyph centered.
+      icon: SizedBox(
+        width: _ToolbarTheme.buttonSize,
+        height: _ToolbarTheme.buttonSize,
+        child: Center(
+          child: Icon(Icons.volume_up,
+              color: Colors.white, size: _ToolbarTheme.buttonSize * 0.625),
+        ),
+      ),
       tooltip: 'Audio devices',
       color: _ToolbarTheme.blueColor,
       hoverColor: _ToolbarTheme.hoverBlueColor,

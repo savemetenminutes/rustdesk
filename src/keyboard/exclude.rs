@@ -195,6 +195,7 @@ lazy_static::lazy_static! {
     static ref EXCLUDE_LISTS: Mutex<HashMap<String, Vec<Chord>>> = Mutex::new(HashMap::new());
     static ref STATE: Mutex<HookState> = Mutex::new(HookState::default());
     static ref RECORDED: Mutex<String> = Mutex::new(String::new());
+    static ref RECORDING_SINCE: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 }
 
 /// Stores `value` as the exclude list of the peer of `session` (peer option and cache) and returns the canonical form.
@@ -241,8 +242,8 @@ struct HookState {
     seq_released: bool,
     /// A chord is diverted to the local PC until all modifiers are released.
     diverted: bool,
-    /// Events re-injected by this module, expected back in the hook: `(position_code, is_press)`.
-    expected: VecDeque<(u32, bool)>,
+    /// Events re-injected by this module, expected back in the hook: `(position_code, is_press, injected at)`.
+    expected: VecDeque<(u32, bool, std::time::Instant)>,
     /// Scan codes of presses swallowed while recording; their releases are swallowed too.
     recorded_presses: std::collections::HashSet<u32>,
 }
@@ -250,10 +251,35 @@ struct HookState {
 /// While true, the keyboard hook records the next chord into `RECORDED` and swallows every key event.
 static RECORDING: AtomicBool = AtomicBool::new(false);
 
+/// Recording MUST end by itself after this long, whatever the UI does: while it lasts, no key reaches any window.
+const RECORDING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// An injected event not seen back in the hook within this time is dropped from `HookState::expected`.
+const EXPECTED_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Starts recording a chord; `take_recorded_chord()` returns it once pressed.
 pub fn start_recording() {
     RECORDED.lock().unwrap().clear();
+    *RECORDING_SINCE.lock().unwrap() = Some(std::time::Instant::now());
     RECORDING.store(true, Ordering::SeqCst);
+    hbb_common::log::info!("keyboard exclude: recording started");
+}
+
+/// Whether recording is on; ends it once `RECORDING_TIMEOUT` has passed.
+fn recording_active() -> bool {
+    if !RECORDING.load(Ordering::SeqCst) {
+        return false;
+    }
+    let expired = RECORDING_SINCE
+        .lock()
+        .unwrap()
+        .map_or(true, |t| t.elapsed() >= RECORDING_TIMEOUT);
+    if expired {
+        RECORDING.store(false, Ordering::SeqCst);
+        hbb_common::log::warn!("keyboard exclude: recording timed out");
+        return false;
+    }
+    true
 }
 
 pub fn stop_recording() {
@@ -290,6 +316,12 @@ fn make_event(key: Key, platform_code: u32, position_code: u32, is_press: bool) 
     }
 }
 
+/// Whether the system reports virtual key `vk` down (`GetAsyncKeyState`).
+#[cfg(target_os = "windows")]
+fn is_key_down(vk: u32) -> bool {
+    unsafe { (winapi::um::winuser::GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 }
+}
+
 fn send_remote(mode: &str, event: &Event) {
     client::process_event(mode, event, None);
 }
@@ -315,7 +347,9 @@ fn release_remote_mods(mode: &str, state: &HookState) {
 
 #[cfg(target_os = "windows")]
 fn inject_local(state: &mut HookState, position_code: u32, is_press: bool) {
-    state.expected.push_back((position_code, is_press));
+    state
+        .expected
+        .push_back((position_code, is_press, std::time::Instant::now()));
     if rdev::simulate_code(None, Some(position_code), is_press).is_err() {
         state.expected.pop_back();
         hbb_common::log::error!(
@@ -330,8 +364,20 @@ fn inject_local(state: &mut HookState, position_code: u32, is_press: bool) {
 #[cfg(all(feature = "flutter", target_os = "windows"))]
 pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> Option<Option<Event>> {
     let mut state = STATE.lock().unwrap();
+    while state
+        .expected
+        .front()
+        .is_some_and(|(_, _, t)| t.elapsed() >= EXPECTED_TIMEOUT)
+    {
+        let (pos, press, _) = state.expected.pop_front().unwrap();
+        hbb_common::log::warn!(
+            "keyboard exclude: injected event 0x{:x} press={} never came back",
+            pos,
+            press
+        );
+    }
     let front = state.expected.front().copied();
-    if let Some((pos, press)) = front {
+    if let Some((pos, press, _)) = front {
         if pos == event.position_code && press == is_press {
             state.expected.pop_front();
             return Some(Some(event.clone()));
@@ -370,14 +416,15 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
 
     // Recording: every press is swallowed (so no other keyboard hook or window sees it), and so is the release of
     // every press swallowed here.
-    if !RECORDING.load(Ordering::SeqCst)
+    let recording = recording_active();
+    if !recording
         && !is_press
         && state.recorded_presses.remove(&event.position_code)
     {
         reset(&mut *state);
         return Some(None);
     }
-    if RECORDING.load(Ordering::SeqCst) {
+    if recording {
         if !is_press {
             state.recorded_presses.remove(&event.position_code);
         }
@@ -405,6 +452,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         if let Some(chord) = chord {
             *RECORDED.lock().unwrap() = chord.to_canonical();
             RECORDING.store(false, Ordering::SeqCst);
+            hbb_common::log::info!("keyboard exclude: recorded {}", chord.to_canonical());
         }
         reset(&mut *state);
         return Some(None);
@@ -415,11 +463,24 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         return None;
     }
 
+    // A diverted chord's modifiers were injected locally, so the system key state reports them down exactly while
+    // they are physically held. A `held` entry the system reports up (its release was never seen here, e.g. another
+    // hook swallowed it) is dropped; with none left, the divert ends and this event is processed normally.
+    if state.diverted && is_press {
+        state.held.retain(|_, e| is_key_down(e.platform_code));
+        reset(&mut *state);
+        if !state.diverted {
+            hbb_common::log::info!("keyboard exclude: divert ended, no diverted modifier is down");
+        }
+    }
     if state.diverted {
         if is_press {
             return Some(Some(event.clone()));
         }
         reset(&mut *state);
+        if !state.diverted {
+            hbb_common::log::info!("keyboard exclude: divert ended");
+        }
         return None;
     }
 
@@ -440,6 +501,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         }
         inject_local(&mut state, event.position_code, true);
         state.diverted = true;
+        hbb_common::log::info!("keyboard exclude: diverted {}", chord.to_canonical());
         return Some(None);
     }
 
@@ -463,6 +525,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         inject_local(&mut state, event.position_code, true);
         inject_local(&mut state, event.position_code, false);
         state.diverted = true;
+        hbb_common::log::info!("keyboard exclude: diverted {}", chord.to_canonical());
         reset(&mut *state);
         return Some(None);
     }

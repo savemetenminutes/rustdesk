@@ -174,6 +174,28 @@ Rect? _primaryScreen(List<window_size.Screen> screens) {
   return screens.first.frame;
 }
 
+/// Returns `frame` moved onto `target`: same offset from the top-left of the screen it was on (centered when it was
+/// on none), size capped at `target`'s size, and kept inside `target`.
+Rect _moveOntoScreen(
+    List<window_size.Screen> screens, Rect frame, Rect target) {
+  final w = frame.width < target.width ? frame.width : target.width;
+  final h = frame.height < target.height ? frame.height : target.height;
+  final from = _screenContaining(screens, frame.center);
+  var dx = from == null ? (target.width - w) / 2 : frame.left - from.left;
+  var dy = from == null ? (target.height - h) / 2 : frame.top - from.top;
+  dx = dx.clamp(0.0, target.width - w);
+  dy = dy.clamp(0.0, target.height - h);
+  return Rect.fromLTWH(target.left + dx, target.top + dy, w, h);
+}
+
+/// Writes `message` to the RustDesk log (`main_display_windows_log`), so window placement can be traced on a user's
+/// PC: Flutter `debugPrint` output is not written to the log in a release build.
+void displayWindowsLog(String message) {
+  try {
+    bind.mainDisplayWindowsLog(message: '[display_windows] window=$kWindowId $message');
+  } catch (_) {}
+}
+
 Rect? _screenContaining(List<window_size.Screen> screens, Offset point) {
   for (final s in screens) {
     if (s.frame.contains(point)) {
@@ -219,6 +241,9 @@ Future<void> applyDisplayWindowState(
     isMaximized = true;
     isFullscreen = false;
   }
+  displayWindowsLog('apply target=$windowId state=${state == null ? null : jsonEncode(state.toJson())} '
+      'targetExists=$targetExists frame=$frame max=$isMaximized fs=$isFullscreen '
+      'screens=${screens.map((s) => s.frame).toList()}');
   final wc = WindowController.fromWindowId(windowId);
   if (windowId == kWindowId && stateGlobal.fullscreen.isTrue && !isFullscreen) {
     stateGlobal.setFullscreen(false);
@@ -325,13 +350,33 @@ Future<void> reportDisplayWindowNow() async {
   } catch (e) {
     debugPrint('Failed to get the screen list: $e');
   }
+  // A maximized / fullscreen window MUST be stored on the screen it is maximized on (`current`): Windows moves a
+  // maximized window between screens (Win+Shift+Arrow, snapping) without a normal-state frame event, so the tracked
+  // restore frame can still lie on the previous screen. It is moved onto that screen, keeping its offset from its own
+  // screen's top-left.
+  final currentScreen = (isMaximized || isFullscreen)
+      ? _screenContaining(screens, current.center)
+      : null;
+  if (currentScreen != null &&
+      _normalFrame != null &&
+      !currentScreen.contains(_normalFrame!.center)) {
+    _normalFrame = _moveOntoScreen(screens, _normalFrame!, currentScreen);
+  }
   for (final session in _sessions!()) {
     final peerId = session.peerId;
     final display = session.display;
     final stored = loadDisplayWindows(peerId)[display];
-    final frame = _normalFrame ?? stored?.frame ?? current;
-    final screen = _screenContaining(screens, frame.center) ??
+    var frame = _normalFrame ?? stored?.frame ?? current;
+    if (currentScreen != null && !currentScreen.contains(frame.center)) {
+      frame = _moveOntoScreen(screens, frame, currentScreen);
+    }
+    final screen = currentScreen ??
+        _screenContaining(screens, frame.center) ??
         _screenContaining(screens, current.center);
+    displayWindowsLog(
+        'report window=$windowId peer=$peerId display=$display frame=$frame screen=$screen '
+        'max=$isMaximized fs=$isFullscreen current=$current style=${session.viewStyle} '
+        'scale=${session.customScalePercent} scroll=${session.scrollX},${session.scrollY}');
     final state = DisplayWindowState(frame, screen, isMaximized, isFullscreen,
         viewStyle: session.viewStyle ?? stored?.viewStyle,
         customScalePercent:

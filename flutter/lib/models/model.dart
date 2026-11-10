@@ -1530,6 +1530,8 @@ class FfiModel with ChangeNotifier {
     }
     final key = sessionId.toString();
     final stored = loadDisplayWindows(peerId)[_pi.currentDisplay];
+    displayWindowsLog('initView session=$key peer=$peerId display=${_pi.currentDisplay} '
+        'stored=${stored == null ? null : jsonEncode(stored.toJson())}');
     final style =
         stored?.viewStyle ?? await bind.sessionGetViewStyle(sessionId: sessionId);
     if (style != null && style.isNotEmpty) {
@@ -1562,8 +1564,12 @@ class FfiModel with ChangeNotifier {
         .toList()
       ..sort();
     if (valid.isEmpty) {
+      displayWindowsLog('restore peer=$peerId stored=${stored.keys.toList()} valid=[] '
+          'displays=${_pi.displays.length}');
       return false;
     }
+    displayWindowsLog('restore peer=$peerId stored=${stored.keys.toList()} valid=$valid '
+        'displays=${_pi.displays.length} current=${_pi.currentDisplay} multi=${_pi.isSupportMultiDisplay}');
     final first = valid.first;
     if (_pi.currentDisplay != first) {
       openMonitorInTheSameTab(first, ffi, _pi, recordSelection: false);
@@ -2425,6 +2431,9 @@ class CanvasModel with ChangeNotifier {
       tries++;
       if (_horizontal.hasClients || _vertical.hasClients) {
         t.cancel();
+        displayWindowsLog('scroll restore x=$x y=$y '
+            'maxX=${_horizontal.hasClients ? _horizontal.position.maxScrollExtent : null} '
+            'maxY=${_vertical.hasClients ? _vertical.position.maxScrollExtent : null}');
         if (x != null && _horizontal.hasClients) {
           _horizontal
               .jumpTo(x.clamp(0.0, _horizontal.position.maxScrollExtent));
@@ -2436,6 +2445,7 @@ class CanvasModel with ChangeNotifier {
         notifyListeners();
       } else if (tries >= 50) {
         t.cancel();
+        displayWindowsLog('scroll restore x=$x y=$y: no scrollbar attached in 10 s');
       }
     });
   }

@@ -459,6 +459,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       final displays = args['displays'];
       final screenRect = parseParamScreenRect(args);
       final prePeerCount = tabController.length;
+      displayWindowsLog('new_remote_desktop id=$id display=$display tabs='
+          '${tabController.state.value.tabs.map((e) => e.key).toList()}');
       Future.delayed(Duration.zero, () async {
         if (stateGlobal.fullscreen.isTrue) {
           await WindowController.fromWindowId(windowId()).setFullscreen(false);

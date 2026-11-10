@@ -417,12 +417,10 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
     // Recording: every press is swallowed (so no other keyboard hook or window sees it), and so is the release of
     // every press swallowed here.
     let recording = recording_active();
-    if !recording
-        && !is_press
-        && state.recorded_presses.remove(&event.position_code)
-    {
-        reset(&mut *state);
-        return Some(None);
+    // After recording, the release of a press swallowed while recording is handled like any release (default path:
+    // sent to the remote PC when the keyboard is grabbed, passed locally): a swallowed release could leave a key down.
+    if !recording && !is_press {
+        state.recorded_presses.remove(&event.position_code);
     }
     if recording {
         if !is_press {

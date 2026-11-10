@@ -259,6 +259,22 @@ jobs:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
+      # vcpkg's x-gha binary cache restores nothing (the GitHub Actions cache v1 API it uses is retired): every run
+      # rebuilt aom, ffmpeg and the rest (~16 min). The files backend in a directory saved by actions/cache replaces it.
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg-binary-cache
+          key: vcpkg-bin-${{ matrix.job.vcpkg-triplet }}-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-bin-${{ matrix.job.vcpkg-triplet }}-${{ env.VCPKG_COMMIT_ID }}-
+
+      - name: Use the files binary cache
+        shell: bash
+        run: |
+          mkdir -p /c/vcpkg-binary-cache
+          echo 'VCPKG_BINARY_SOURCES=clear;files,C:\vcpkg-binary-cache,readwrite' >> "$GITHUB_ENV"
+
       - name: Install vcpkg dependencies
         env:
           VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.job.vcpkg-triplet }}

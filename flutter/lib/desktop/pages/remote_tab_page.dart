@@ -77,11 +77,13 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           return DisplayWindowSession(e.$1, ffi.ffiModel.pi.currentDisplay,
               viewStyle: windowViewStyles[key],
               customScalePercent: windowCustomScalePercents[key],
-              scrollX: c.scrollHorizontal.hasClients
+              // While a restore settles, the stored offsets are kept (null = stored value).
+              scrollX: !c.scrollRestorePending && c.scrollHorizontal.hasClients
                   ? c.scrollHorizontal.offset
                   : null,
-              scrollY:
-                  c.scrollVertical.hasClients ? c.scrollVertical.offset : null);
+              scrollY: !c.scrollRestorePending && c.scrollVertical.hasClients
+                  ? c.scrollVertical.offset
+                  : null);
         }).toList());
     stateGlobal.fullscreen.listen((_) => reportDisplayWindowSoon());
     tryMoveToScreenAndSetFullscreen(screenRect);

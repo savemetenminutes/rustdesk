@@ -2454,29 +2454,63 @@ class CanvasModel with ChangeNotifier {
     }
   }
 
+  /// True from `restoreScrollOffset()` until the restored offsets have held for `_kScrollSettle` or the user scrolls
+  /// (`endScrollRestore()`); while true, the window's report keeps the stored offsets instead of the current ones.
+  bool scrollRestorePending = false;
+  Timer? _scrollRestoreTimer;
+  static const Duration _kScrollSettle = Duration(seconds: 3);
+
+  void endScrollRestore() {
+    if (!scrollRestorePending) return;
+    scrollRestorePending = false;
+    _scrollRestoreTimer?.cancel();
+    _scrollRestoreTimer = null;
+  }
+
   /// Jumps the scroll controllers to the pixel offsets `x` / `y` once the scrollbars are attached (checked every
-  /// 200 ms for up to 10 s; scroll-auto mode attaches none).
+  /// 200 ms for up to 10 s; scroll-auto mode attaches none), and jumps them back for `_kScrollSettle` whenever a
+  /// re-layout moves them (the first frames re-layout the canvas and reset the offsets).
   void restoreScrollOffset(double? x, double? y) {
+    endScrollRestore();
+    scrollRestorePending = true;
     var tries = 0;
-    Timer.periodic(const Duration(milliseconds: 200), (t) {
+    DateTime? attachedAt;
+    _scrollRestoreTimer = Timer.periodic(const Duration(milliseconds: 200), (t) {
       tries++;
-      if (_horizontal.hasClients || _vertical.hasClients) {
-        t.cancel();
-        displayWindowsLog('scroll restore x=$x y=$y '
+      if (!_horizontal.hasClients && !_vertical.hasClients) {
+        if (attachedAt == null && tries >= 50) {
+          displayWindowsLog('scroll restore x=$x y=$y: no scrollbar attached in 10 s');
+          endScrollRestore();
+        }
+        return;
+      }
+      var moved = false;
+      if (x != null && _horizontal.hasClients) {
+        final target = x.clamp(0.0, _horizontal.position.maxScrollExtent);
+        if ((_horizontal.offset - target).abs() > 0.5) {
+          _horizontal.jumpTo(target);
+          moved = true;
+        }
+      }
+      if (y != null && _vertical.hasClients) {
+        final target = y.clamp(0.0, _vertical.position.maxScrollExtent);
+        if ((_vertical.offset - target).abs() > 0.5) {
+          _vertical.jumpTo(target);
+          moved = true;
+        }
+      }
+      if (moved) {
+        displayWindowsLog('scroll restore x=$x y=$y applied '
             'maxX=${_horizontal.hasClients ? _horizontal.position.maxScrollExtent : null} '
             'maxY=${_vertical.hasClients ? _vertical.position.maxScrollExtent : null}');
-        if (x != null && _horizontal.hasClients) {
-          _horizontal
-              .jumpTo(x.clamp(0.0, _horizontal.position.maxScrollExtent));
-        }
-        if (y != null && _vertical.hasClients) {
-          _vertical.jumpTo(y.clamp(0.0, _vertical.position.maxScrollExtent));
-        }
         updateScrollPercent();
         notifyListeners();
-      } else if (tries >= 50) {
-        t.cancel();
-        displayWindowsLog('scroll restore x=$x y=$y: no scrollbar attached in 10 s');
+      }
+      attachedAt ??= DateTime.now();
+      if (DateTime.now().difference(attachedAt!) >= _kScrollSettle) {
+        displayWindowsLog('scroll restore x=$x y=$y settled');
+        endScrollRestore();
+        reportDisplayWindowSoon();
       }
     });
   }
@@ -2864,6 +2898,7 @@ class CanvasModel with ChangeNotifier {
 
     setScrollPercent(scrollPixelPercent.x, scrollPixelPercent.y);
     pushScrollPositionToUI(scrollPixel.x, scrollPixel.y);
+    endScrollRestore();
     reportDisplayWindowSoon();
 
     notifyListeners();

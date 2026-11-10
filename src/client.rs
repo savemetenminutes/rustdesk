@@ -93,6 +93,7 @@ use crate::ui_session_interface::SessionPermissionConfig;
 
 pub use super::lang::*;
 
+pub mod audio_devices;
 #[cfg(not(target_os = "linux"))]
 mod audio_playback;
 #[cfg(target_os = "windows")]
@@ -2374,13 +2375,7 @@ impl AudioHandler {
     /// Start the audio playback.
     #[cfg(not(target_os = "linux"))]
     fn start_audio(&mut self, format0: AudioFormat) -> ResultType<()> {
-        let device = AUDIO_HOST
-            .default_output_device()
-            .with_context(|| "Failed to get default output device")?;
-        log::info!(
-            "Using default output device: \"{}\"",
-            device.name().unwrap_or("".to_owned())
-        );
+        let device = open_output_device()?;
         let config = device.default_output_config().map_err(|e| anyhow!(e))?;
         let sample_format = config.sample_format();
         log::info!("Default output format: {:?}", config);
@@ -2595,6 +2590,54 @@ impl AudioHandler {
         self.audio_stream = Some(Box::new(stream));
         self.playback_status = playback_status;
         Ok(())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+thread_local! {
+    /// Name of the output device the playback stream of this audio thread opened.
+    static OPENED_OUTPUT_DEVICE: std::cell::RefCell<Option<String>> = Default::default();
+}
+
+/// Returns the output device that playback of this audio thread MUST use now: the selected device
+/// (`audio_devices::thread_output_selection()`) when it is present, else the default output device.
+#[cfg(not(target_os = "linux"))]
+fn resolve_output_device() -> ResultType<Device> {
+    let selected = audio_devices::thread_output_selection();
+    if !selected.is_empty() {
+        if let Ok(mut devices) = AUDIO_HOST.output_devices() {
+            if let Some(device) = devices.find(|d| d.name().ok().as_deref() == Some(&selected)) {
+                return Ok(device);
+            }
+        }
+        log::warn!("Output device \"{selected}\" is not present; using the default output device");
+    }
+    AUDIO_HOST
+        .default_output_device()
+        .with_context(|| "Failed to get default output device")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_output_device() -> ResultType<Device> {
+    let device = resolve_output_device()?;
+    let name = device.name().unwrap_or_default();
+    log::info!("Using output device: \"{name}\"");
+    OPENED_OUTPUT_DEVICE.with(|o| *o.borrow_mut() = Some(name));
+    Ok(device)
+}
+
+/// Whether the device `resolve_output_device()` returns now differs from the one playback opened.
+#[cfg(target_os = "windows")]
+fn output_device_changed() -> bool {
+    let Some(opened) = OPENED_OUTPUT_DEVICE.with(|o| o.borrow().clone()) else {
+        return false;
+    };
+    match resolve_output_device().map(|d| d.name().unwrap_or_default()) {
+        Ok(name) if !name.is_empty() && name != opened => {
+            log::info!("Output device changed from \"{opened}\" to \"{name}\"");
+            true
+        }
+        _ => false,
     }
 }
 
@@ -4131,9 +4174,10 @@ pub fn start_video_thread<F, T>(
 
 /// Start an audio thread
 /// Return a audio [`MediaSender`]
-pub fn start_audio_thread() -> MediaSender {
+pub fn start_audio_thread(peer_id: String) -> MediaSender {
     let (audio_sender, audio_receiver) = mpsc::channel::<MediaData>();
     std::thread::spawn(move || {
+        audio_devices::set_thread_peer_id(&peer_id);
         let mut audio_handler = AudioHandler::default();
         loop {
             #[cfg(target_os = "windows")]

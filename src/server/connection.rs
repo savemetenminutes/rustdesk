@@ -1246,6 +1246,7 @@ impl Connection {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             try_stop_record_cursor_pos();
         }
+        super::audio_service::set_connection_input_device(conn.inner.id(), None);
         conn.on_close("End", true).await;
         log::info!("#{} connection loop exited", id);
     }
@@ -3990,7 +3991,7 @@ impl Connection {
                         if !self.disable_audio {
                             // Drop the audio sender previously.
                             drop(std::mem::replace(&mut self.audio_sender, None));
-                            self.audio_sender = Some(start_audio_thread());
+                            self.audio_sender = Some(start_audio_thread(String::new()));
                             self.audio_sender
                                 .as_ref()
                                 .map(|a| allow_err!(a.send(MediaData::AudioFormat(format))));
@@ -4063,6 +4064,28 @@ impl Connection {
                             } else if !self.terminal {
                                 self.try_sub_monitor_services();
                             }
+                        }
+                    }
+                    Some(misc::Union::RequestAudioInputs(_)) => {
+                        if self.audio_enabled() {
+                            let mut misc = Misc::new();
+                            misc.set_audio_inputs(AudioInputs {
+                                devices: super::audio_service::get_capture_devices(),
+                                own_setting: Config::get_option("audio-input"),
+                                system_sound: super::audio_service::empty_input_is_system_sound(),
+                                ..Default::default()
+                            });
+                            let mut msg_out = Message::new();
+                            msg_out.set_misc(misc);
+                            self.send(msg_out).await;
+                        }
+                    }
+                    Some(misc::Union::AudioInputSelection(s)) => {
+                        if self.audio_enabled() {
+                            super::audio_service::set_connection_input_device(
+                                self.inner.id(),
+                                s.is_override.then(|| s.device.clone()),
+                            );
                         }
                     }
                     Some(misc::Union::MessageQuery(mq)) => {

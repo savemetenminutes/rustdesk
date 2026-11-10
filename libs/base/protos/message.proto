@@ -872,7 +872,32 @@ message Misc {
     // is rebuilt, and held again, the next time it is shown, before any connection names it
     // by id again, so the shape just selected is always there to give.
     uint64 request_cursor_data = 39;
+    // Fork extension, numbered away from upstream.
+    // Controller -> controlled: send `AudioInputs`.
+    bool request_audio_inputs = 1001;
+    // Controlled -> controller: the capture devices and the controlled side's own setting.
+    AudioInputs audio_inputs = 1002;
+    // Controller -> controlled: the capture device for this connection.
+    AudioInputSelection audio_input_selection = 1003;
   }
+}
+
+message AudioInputs {
+  // Capture device names.
+  repeated string devices = 1;
+  // The controlled side's own "audio-input" option; "" is System Sound (loopback of the default output device) on
+  // Windows, else the default input device.
+  string own_setting = 2;
+  // Whether "" means System Sound on the controlled side.
+  bool system_sound = 3;
+}
+
+message AudioInputSelection {
+  // false: the controlled side's own "audio-input" option.
+  bool is_override = 1;
+  // With `is_override`: a name from `AudioInputs.devices`, or "" for System Sound / the default input device. A name
+  // the controlled side does not currently have falls back to its default input device.
+  string device = 2;
 }
 
 message VoiceCallRequest {

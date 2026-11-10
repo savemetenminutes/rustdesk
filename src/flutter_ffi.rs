@@ -749,6 +749,65 @@ pub fn session_peer_option(session_id: SessionID, name: String, value: String) {
     }
 }
 
+/// JSON array of this side's output device names.
+pub fn main_get_audio_output_devices() -> SyncReturn<String> {
+    SyncReturn(
+        serde_json::to_string(&crate::client::audio_devices::get_output_devices())
+            .unwrap_or_default(),
+    )
+}
+
+/// Stores the output device of the session's peer ("" = default output device, followed live); playback switches
+/// within one second.
+pub fn session_set_audio_output_device(session_id: SessionID, device: String) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.set_option(
+            crate::client::audio_devices::OPTION_AUDIO_OUTPUT_DEVICE.to_owned(),
+            device.clone(),
+        );
+        let peer_id = session.lc.read().unwrap().get_id().to_owned();
+        crate::client::audio_devices::set_output_selection(&peer_id, &device);
+    }
+}
+
+/// Asks the peer for its capture devices; `session_get_remote_audio_inputs()` returns them once they arrive.
+pub fn session_request_remote_audio_inputs(session_id: SessionID) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        let peer_id = session.lc.read().unwrap().get_id().to_owned();
+        crate::client::audio_devices::clear_remote_inputs(&peer_id);
+        crate::client::Interface::send(
+            &*session,
+            crate::client::Data::Message(crate::client::audio_devices::request_inputs_message()),
+        );
+    }
+}
+
+/// JSON `{"devices": [...], "own_setting": "...", "system_sound": bool}` received from the peer, or "".
+pub fn session_get_remote_audio_inputs(session_id: SessionID) -> SyncReturn<String> {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        let peer_id = session.lc.read().unwrap().get_id().to_owned();
+        return SyncReturn(crate::client::audio_devices::remote_inputs_json(&peer_id));
+    }
+    SyncReturn("".to_owned())
+}
+
+/// Stores the peer's capture device selection (peer option `audio-input-device`: "" = the peer's own setting,
+/// "=" + name = that device, "=" = System Sound / default input) and sends it to the peer.
+pub fn session_set_remote_audio_input(session_id: SessionID, value: String) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.set_option(
+            crate::client::audio_devices::OPTION_AUDIO_INPUT_DEVICE.to_owned(),
+            value.clone(),
+        );
+        crate::client::Interface::send(
+            &*session,
+            crate::client::Data::Message(crate::client::audio_devices::input_selection_message(
+                &value,
+            )),
+        );
+    }
+}
+
 /// Stores the keyboard shortcut exclude list of the session's peer; returns its canonical form.
 pub fn session_set_keyboard_exclude_shortcuts(session_id: SessionID, value: String) -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

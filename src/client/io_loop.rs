@@ -129,9 +129,18 @@ impl<T: InvokeUiSession> Remote<T> {
         receiver: mpsc::UnboundedReceiver<Data>,
         sender: mpsc::UnboundedSender<Data>,
     ) -> Self {
+        let peer_id = handler.lc.read().unwrap().get_id().to_owned();
+        crate::client::audio_devices::set_output_selection(
+            &peer_id,
+            &handler
+                .lc
+                .read()
+                .unwrap()
+                .get_option(crate::client::audio_devices::OPTION_AUDIO_OUTPUT_DEVICE),
+        );
         Self {
             handler,
-            audio_sender: crate::client::start_audio_thread(),
+            audio_sender: crate::client::start_audio_thread(peer_id),
             receiver,
             sender,
             read_jobs: Vec::new(),
@@ -1820,6 +1829,22 @@ impl<T: InvokeUiSession> Remote<T> {
                             self.handler.load_last_jobs();
                         }
 
+                        if self.handler.is_default() {
+                            let input = self.handler.lc.read().unwrap().get_option(
+                                crate::client::audio_devices::OPTION_AUDIO_INPUT_DEVICE,
+                            );
+                            if !input.is_empty() {
+                                allow_err!(
+                                    peer.send(
+                                        &crate::client::audio_devices::input_selection_message(
+                                            &input
+                                        )
+                                    )
+                                    .await
+                                );
+                            }
+                        }
+
                         self.is_connected = true;
                     }
                     _ => {}
@@ -2473,6 +2498,10 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                     Some(misc::Union::FollowCurrentDisplay(d_idx)) => {
                         self.handler.set_current_display(d_idx);
+                    }
+                    Some(misc::Union::AudioInputs(inputs)) => {
+                        let peer_id = self.handler.lc.read().unwrap().get_id().to_owned();
+                        crate::client::audio_devices::set_remote_inputs(&peer_id, inputs);
                     }
                     _ => {}
                 },

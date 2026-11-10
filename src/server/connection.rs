@@ -4066,8 +4066,10 @@ impl Connection {
                             }
                         }
                     }
+                    // Gated on the audio permission (`self.audio`), not on the controller's mute
+                    // (`disable_audio`): a muted controller still chooses the capture device.
                     Some(misc::Union::RequestAudioInputs(_)) => {
-                        if self.audio_enabled() {
+                        if self.audio {
                             let mut misc = Misc::new();
                             misc.set_audio_inputs(AudioInputs {
                                 devices: super::audio_service::get_capture_devices(),
@@ -4081,7 +4083,7 @@ impl Connection {
                         }
                     }
                     Some(misc::Union::AudioInputSelection(s)) => {
-                        if self.audio_enabled() {
+                        if self.audio {
                             super::audio_service::set_connection_input_device(
                                 self.inner.id(),
                                 s.is_override.then(|| s.device.clone()),

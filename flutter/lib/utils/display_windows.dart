@@ -19,6 +19,7 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/main.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
+import 'package:get/get.dart';
 import 'package:window_size/window_size.dart' as window_size;
 
 const String kPeerOptionDisplayWindows = 'display_windows';

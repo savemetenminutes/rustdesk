@@ -95,10 +95,26 @@ class RustDeskMultiWindowManager {
     }
   }
 
+  /// Tail of the `openMonitorSession()` queue.
+  Future<void> _monitorSessionQueue = Future.value();
+
   // This function must be called in the main window thread.
   // Because the _remoteDesktopWindows is managed in that thread.
-  openMonitorSession(int windowId, String peerId, int display, int displayCount,
-      Rect? screenRect, int windowType) async {
+  //
+  // Calls run one at a time: concurrent calls (one per restored display) MUST NOT pass the
+  // `kWindowEventActiveDisplaySession` check or pick a window before the previous call has registered its window.
+  Future<void> openMonitorSession(int windowId, String peerId, int display,
+      int displayCount, Rect? screenRect, int windowType) {
+    final f = _monitorSessionQueue.then((_) => _openMonitorSession(
+        windowId, peerId, display, displayCount, screenRect, windowType));
+    _monitorSessionQueue = f.catchError((e) {
+      debugPrint('openMonitorSession failed: $e');
+    });
+    return f;
+  }
+
+  Future<void> _openMonitorSession(int windowId, String peerId, int display,
+      int displayCount, Rect? screenRect, int windowType) async {
     final isCamera = windowType == WindowType.ViewCamera.index;
     final windowIDs = isCamera ? _viewCameraWindows : _remoteDesktopWindows;
     if (windowIDs.length > 1) {
@@ -200,6 +216,10 @@ class RustDeskMultiWindowManager {
       if (_inactiveWindows.isNotEmpty) {
         for (final windowId in windows) {
           if (_inactiveWindows.contains(windowId)) {
+            // Claim the hidden window before the first `await`, so a concurrent call cannot pick it too: its
+            // `kWindowEventNewRemoteDesktop` would add a tab with the same peer id key, which
+            // `DesktopTabController.add()` drops.
+            _inactiveWindows.remove(windowId);
             if (screenRect == null) {
               final params = jsonDecode(msg);
               await restoreWindowPosition(type,

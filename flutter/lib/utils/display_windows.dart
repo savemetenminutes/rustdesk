@@ -172,36 +172,46 @@ Rect? _normalFrame;
 
 /// Applies `state` to window `windowId`.
 ///
-/// The target screen is `state.screen`; when no current local screen equals it, the window MUST open maximized on the
-/// primary screen with the restore frame `kDisplayWindowFallbackSize` at `kDisplayWindowFallbackOffset`.
+/// The target screen is `state.screen`. A window without a stored state (`state == null`) or whose target screen no
+/// current local screen equals MUST open maximized, never fullscreen, on the primary screen, with the restore frame
+/// `kDisplayWindowFallbackSize` at `kDisplayWindowFallbackOffset`.
 Future<void> applyDisplayWindowState(
-    int windowId, DisplayWindowState state) async {
-  var frame = state.frame;
-  var isMaximized = state.isMaximized;
-  var isFullscreen = state.isFullscreen;
+    int windowId, DisplayWindowState? state) async {
+  Rect? frame = state?.frame;
+  var isMaximized = state?.isMaximized ?? true;
+  var isFullscreen = state?.isFullscreen ?? false;
   List<window_size.Screen> screens = [];
   try {
     screens = await window_size.getScreenList();
   } catch (e) {
     debugPrint('Failed to get the screen list: $e');
   }
-  final targetExists = screens.isEmpty ||
-      (state.screen != null && _findScreen(screens, state.screen!) != null);
+  final targetExists = state != null &&
+      (screens.isEmpty ||
+          (state.screen != null &&
+              _findScreen(screens, state.screen!) != null));
   if (!targetExists) {
-    final primary = _primaryScreen(screens)!;
-    frame = Rect.fromLTWH(
-        primary.left + kDisplayWindowFallbackOffset,
-        primary.top + kDisplayWindowFallbackOffset,
-        kDisplayWindowFallbackSize.width,
-        kDisplayWindowFallbackSize.height);
+    final primary = _primaryScreen(screens);
+    frame = primary == null
+        ? null
+        : Rect.fromLTWH(
+            primary.left + kDisplayWindowFallbackOffset,
+            primary.top + kDisplayWindowFallbackOffset,
+            kDisplayWindowFallbackSize.width,
+            kDisplayWindowFallbackSize.height);
     isMaximized = true;
     isFullscreen = false;
   }
   final wc = WindowController.fromWindowId(windowId);
-  if (kWindowId == windowId) {
-    _normalFrame = frame;
+  if (windowId == kWindowId && stateGlobal.fullscreen.isTrue && !isFullscreen) {
+    stateGlobal.setFullscreen(false);
   }
-  await wc.setFrame(frame);
+  if (frame != null) {
+    if (kWindowId == windowId) {
+      _normalFrame = frame;
+    }
+    await wc.setFrame(frame);
+  }
   // A delay is needed, or the window is restored after maximize/fullscreen (same as `restoreWindowPosition()`).
   Future.delayed(const Duration(milliseconds: 300), () async {
     if (isFullscreen) {

@@ -2025,8 +2025,9 @@ Future<Offset?> _adjustRestoreMainWindowOffset(
 //
 // display is used to set the offset of the window in individual display mode.
 //
-// A remote desktop window of a peer with stored display windows (`loadDisplayWindows()`) gets the stored state of
-// `display`, or of the lowest stored display when `display` is null (the window that opens the connection).
+// A remote desktop window gets the stored state (`loadDisplayWindows()`) of `display`, or of the lowest stored display
+// when `display` is null (the window that opens the connection); without a stored state it opens maximized on the
+// primary screen (`applyDisplayWindowState()` with `null`).
 // `ignoreDisplayWindows` is true for a tab moved to a new window: its display is known only from the moved session.
 Future<bool> restoreWindowPosition(WindowType type,
     {int? windowId,
@@ -2048,14 +2049,12 @@ Future<bool> restoreWindowPosition(WindowType type,
       peerId != null &&
       !ignoreDisplayWindows) {
     final stored = loadDisplayWindows(peerId);
-    if (stored.isNotEmpty) {
-      final state =
-          stored[display ?? (stored.keys.toList()..sort()).first];
-      if (state != null) {
-        await applyDisplayWindowState(windowId, state);
-        return true;
-      }
-    }
+    final state = stored.isEmpty
+        ? null
+        : stored[display ?? (stored.keys.toList()..sort()).first];
+    // No stored state: maximized on the primary screen, never fullscreen.
+    await applyDisplayWindowState(windowId, state);
+    return true;
   }
 
   bool isRemotePeerPos = false;

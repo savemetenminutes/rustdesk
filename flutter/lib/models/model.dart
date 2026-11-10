@@ -1589,6 +1589,15 @@ class FfiModel with ChangeNotifier {
     if (await _tryRestoreDisplayWindows(peerId)) {
       return;
     }
+    // A remote desktop connection without a stored window for a display the peer has opens only the peer's current
+    // (main) display, maximized on the primary screen and never fullscreen; `use_all_my_displays_for_the_remote_session`
+    // does not apply to it.
+    if (isDesktop && parent.target?.connType == ConnType.defaultConn) {
+      if (loadDisplayWindows(peerId).isNotEmpty) {
+        await applyDisplayWindowState(stateGlobal.windowId, null);
+      }
+      return;
+    }
     if (bind.sessionGetUseAllMyDisplaysForTheRemoteSession(
             sessionId: sessionId) !=
         'Y') {

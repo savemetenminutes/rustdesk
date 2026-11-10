@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/main.dart';
-import 'package:flutter_hbb/utils/display_windows.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 
 /// must keep the order
@@ -258,10 +257,9 @@ class RustDeskMultiWindowManager {
     final msg = jsonEncode(params);
 
     // separate window for file transfer is not supported
-    // A peer with stored display windows opens in its own window, so its first display gets its stored frame.
-    bool openInTabs = type != WindowType.RemoteDesktop ||
-        (mainGetLocalBoolOptionSync(kOptionOpenNewConnInTabs) &&
-            loadDisplayWindows(remoteId).isEmpty);
+    // A remote desktop connection MUST open in its own window, never as a tab of an existing window
+    // (`kOptionOpenNewConnInTabs` is ignored for it).
+    bool openInTabs = type != WindowType.RemoteDesktop;
 
     if (windows.length > 1 || !openInTabs) {
       for (final windowId in windows) {

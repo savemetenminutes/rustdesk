@@ -359,12 +359,57 @@ fn inject_local(state: &mut HookState, position_code: u32, is_press: bool) {
     state
         .expected
         .push_back((position_code, is_press, std::time::Instant::now()));
-    if rdev::simulate_code(None, Some(position_code), is_press).is_err() {
+    // Windows can deliver the injected event to this hook before `SendInput` returns (a nested call on this thread):
+    // `on_hook_event()` then passes it to the local PC through `INJECTING`, and it is not expected any more.
+    INJECTING.with(|i| i.set(true));
+    REENTERED.with(|r| r.set(0));
+    let res = rdev::simulate_code(None, Some(position_code), is_press);
+    INJECTING.with(|i| i.set(false));
+    if res.is_err() || REENTERED.with(|r| r.get()) > 0 {
         state.expected.pop_back();
+    }
+    if res.is_err() {
         hbb_common::log::error!(
             "keyboard exclude: failed to inject scan code 0x{:x}",
             position_code
         );
+    }
+}
+
+thread_local! {
+    /// True while `inject_local()` is inside `SendInput`.
+    static INJECTING: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    /// Nested hook calls during the current `inject_local()`.
+    static REENTERED: std::cell::Cell<u32> = std::cell::Cell::new(0);
+}
+
+/// Whether some program on this PC has registered `mods` + virtual key `vk` as a global hotkey (`RegisterHotKey`
+/// fails with `ERROR_HOTKEY_ALREADY_REGISTERED`). Such a hotkey fires only when the keys reach this PC's input
+/// system, which the grabbed session prevents; AutoHotkey registers its plain hotkeys this way.
+#[cfg(target_os = "windows")]
+fn registered_hotkey(mods: u8, vk: u32) -> bool {
+    use winapi::um::winuser::{RegisterHotKey, UnregisterHotKey};
+    const ID: i32 = 0xBFF0;
+    let mut m: u32 = 0x4000; // MOD_NOREPEAT
+    if mods & MOD_ALT != 0 {
+        m |= 0x0001;
+    }
+    if mods & MOD_CTRL != 0 {
+        m |= 0x0002;
+    }
+    if mods & MOD_SHIFT != 0 {
+        m |= 0x0004;
+    }
+    if mods & MOD_WIN != 0 {
+        m |= 0x0008;
+    }
+    unsafe {
+        if RegisterHotKey(std::ptr::null_mut(), ID, m, vk) != 0 {
+            UnregisterHotKey(std::ptr::null_mut(), ID);
+            false
+        } else {
+            std::io::Error::last_os_error().raw_os_error() == Some(1409)
+        }
     }
 }
 
@@ -375,6 +420,10 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
     // While this thread waits in `CallNextHookEx` (`probe_next_hooks()`), Windows can deliver another keyboard event to
     // it (e.g. one a later hook injects): that nested call MUST take the default path and MUST NOT wait for `STATE`,
     // which would hang the hook thread for good (Windows then stops calling the hook: no key reaches the session).
+    if INJECTING.with(|i| i.get()) {
+        REENTERED.with(|r| r.set(r.get() + 1));
+        return Some(Some(event.clone()));
+    }
     if IN_PROBE.with(|p| p.get()) {
         return None;
     }
@@ -490,6 +539,10 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         }
     }
     if state.diverted {
+        // Keys another program injects while the chord is held (a hotkey typing its text) go to the remote PC.
+        if is_press && event.extra_data != 0 {
+            return None;
+        }
         if is_press {
             return Some(Some(event.clone()));
         }
@@ -506,7 +559,16 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
             mods: held_bits_before,
             key: Some(key),
         };
-        if !cur_exclude_list().contains(&chord) {
+        let hotkey = held_bits_before & (MOD_CTRL | MOD_ALT) != 0
+            && held_bits_before & MOD_WIN == 0
+            && registered_hotkey(held_bits_before, event.platform_code);
+        if hotkey {
+            hbb_common::log::info!(
+                "keyboard exclude: {} is a registered hotkey on this PC",
+                chord.to_canonical()
+            );
+        }
+        if !hotkey && !cur_exclude_list().contains(&chord) {
             let probe = ProbeInput::from_state(&state);
             drop(state);
             return probe_next_hooks(probe, event, true);

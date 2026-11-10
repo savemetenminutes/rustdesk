@@ -383,9 +383,14 @@ thread_local! {
     static REENTERED: std::cell::Cell<u32> = std::cell::Cell::new(0);
 }
 
-/// `VK_PACKET`: a `SendInput` event with `KEYEVENTF_UNICODE` (AutoHotkey types characters missing from the current
-/// layout this way); its scan code field holds a UTF-16 code unit, not a key position.
-const VK_PACKET: u32 = 0xE7;
+/// Whether `event` is a `VK_PACKET` event: a `SendInput` event with `KEYEVENTF_UNICODE` (AutoHotkey types characters
+/// missing from the current layout this way), whose scan code field holds a UTF-16 code unit, not a key position.
+/// rdev's `get_code()` replaces the virtual key `VK_PACKET` with that scan code field, so the event carries the code
+/// unit in both `platform_code` and `position_code`; for a key, the virtual key and the scan code differ (letters
+/// 0x41-0x5A / 0x10-0x32, digits 0x30-0x39 / 0x02-0x0B, extended keys carry the 0xE0 prefix in `position_code`).
+fn is_packet_event(event: &Event) -> bool {
+    event.platform_code == event.position_code && event.platform_code != 0
+}
 
 thread_local! {
     /// High surrogate of a character split over two `VK_PACKET` events.
@@ -416,6 +421,7 @@ fn send_packet_char(event: &Event, is_press: bool) -> Option<Event> {
     key_event.down = true;
     key_event.press = true;
     key_event.mode = base::message_proto::KeyboardMode::Legacy.into();
+    hbb_common::log::info!("[kbd] unicode packet {:?} sent as text", key_event.seq());
     super::send_key_event(&key_event);
     None
 }
@@ -464,7 +470,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
     if IN_PROBE.with(|p| p.get()) {
         return None;
     }
-    if hooked && event.platform_code == VK_PACKET {
+    if hooked && is_packet_event(event) {
         return Some(send_packet_char(event, is_press));
     }
     let Ok(mut state) = STATE.try_lock() else {

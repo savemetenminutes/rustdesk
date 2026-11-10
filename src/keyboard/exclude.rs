@@ -306,7 +306,8 @@ fn inject_local(state: &mut HookState, position_code: u32, is_press: bool) {
 #[cfg(all(feature = "flutter", target_os = "windows"))]
 pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> Option<Option<Event>> {
     let mut state = STATE.lock().unwrap();
-    if let Some(&(pos, press)) = state.expected.front() {
+    let front = state.expected.front().copied();
+    if let Some((pos, press)) = front {
         if pos == event.position_code && press == is_press {
             state.expected.pop_front();
             return Some(Some(event.clone()));
@@ -344,7 +345,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
     };
 
     if !hooked {
-        reset(&mut state);
+        reset(&mut *state);
         return None;
     }
 
@@ -352,7 +353,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         if is_press {
             return Some(Some(event.clone()));
         }
-        reset(&mut state);
+        reset(&mut *state);
         return None;
     }
 
@@ -383,7 +384,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
             key: None,
         };
         if !cur_exclude_list().contains(&chord) {
-            reset(&mut state);
+            reset(&mut *state);
             return None;
         }
         let mode = super::get_keyboard_mode();
@@ -396,11 +397,11 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         inject_local(&mut state, event.position_code, true);
         inject_local(&mut state, event.position_code, false);
         state.diverted = true;
-        reset(&mut state);
+        reset(&mut *state);
         return Some(None);
     }
 
-    reset(&mut state);
+    reset(&mut *state);
     None
 }
 

@@ -2606,7 +2606,7 @@ fn resolve_output_device() -> ResultType<Device> {
     let selected = audio_devices::thread_output_selection();
     if !selected.is_empty() {
         if let Ok(mut devices) = AUDIO_HOST.output_devices() {
-            if let Some(device) = devices.find(|d| d.name().ok().as_deref() == Some(&selected)) {
+            if let Some(device) = devices.find(|d| d.name().ok().as_deref() == Some(selected.as_str())) {
                 return Ok(device);
             }
         }

@@ -749,6 +749,27 @@ pub fn session_peer_option(session_id: SessionID, name: String, value: String) {
     }
 }
 
+/// Stores the keyboard shortcut exclude list of the session's peer; returns its canonical form.
+pub fn session_set_keyboard_exclude_shortcuts(session_id: SessionID, value: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        return crate::keyboard::exclude::set_exclude_list(&session, &value);
+    }
+    let _ = (session_id, value);
+    "".to_owned()
+}
+
+/// Canonical form of a keyboard chord (`Ctrl+Alt+Shift+Win+<key>`), or "" when it is not a valid chord.
+pub fn main_normalize_keyboard_shortcut(chord: String) -> SyncReturn<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return SyncReturn(crate::keyboard::exclude::normalize_chord(&chord));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = chord;
+        SyncReturn("".to_owned())
+    }
+}
+
 pub fn session_get_peer_option(session_id: SessionID, name: String) -> String {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         return session.get_option(name);

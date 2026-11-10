@@ -81,6 +81,8 @@ lazy_static::lazy_static! {
 }
 
 pub mod shortcuts;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod exclude;
 
 pub mod client {
     use super::*;
@@ -681,7 +683,19 @@ fn start_grab_loop() {
                 return None;
             }
 
-            let res = if KEYBOARD_HOOKED.load(Ordering::SeqCst) {
+            #[cfg(all(feature = "flutter", target_os = "windows"))]
+            let excluded = exclude::on_hook_event(
+                &event,
+                key,
+                is_press,
+                KEYBOARD_HOOKED.load(Ordering::SeqCst),
+            );
+            #[cfg(not(all(feature = "flutter", target_os = "windows")))]
+            let excluded: Option<Option<Event>> = None;
+
+            let res = if let Some(res) = excluded {
+                res
+            } else if KEYBOARD_HOOKED.load(Ordering::SeqCst) {
                 client::process_event(&get_keyboard_mode(), &event, None);
                 if is_press {
                     None

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/main.dart';
+import 'package:flutter_hbb/utils/display_windows.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 
 /// must keep the order
@@ -201,8 +202,13 @@ class RustDeskMultiWindowManager {
         for (final windowId in windows) {
           if (_inactiveWindows.contains(windowId)) {
             if (screenRect == null) {
+              final params = jsonDecode(msg);
               await restoreWindowPosition(type,
-                  windowId: windowId, peerId: remoteId);
+                  windowId: windowId,
+                  peerId: remoteId,
+                  display: params['display'] as int?,
+                  ignoreDisplayWindows: params['tab_window_id'] != null &&
+                      params['display'] == null);
             }
             await DesktopMultiWindow.invokeMethod(windowId, methodName, msg);
             if (methodName != kWindowEventNewRemoteDesktop) {
@@ -252,8 +258,10 @@ class RustDeskMultiWindowManager {
     final msg = jsonEncode(params);
 
     // separate window for file transfer is not supported
+    // A peer with stored display windows opens in its own window, so its first display gets its stored frame.
     bool openInTabs = type != WindowType.RemoteDesktop ||
-        mainGetLocalBoolOptionSync(kOptionOpenNewConnInTabs);
+        (mainGetLocalBoolOptionSync(kOptionOpenNewConnInTabs) &&
+            loadDisplayWindows(remoteId).isEmpty);
 
     if (windows.length > 1 || !openInTabs) {
       for (final windowId in windows) {

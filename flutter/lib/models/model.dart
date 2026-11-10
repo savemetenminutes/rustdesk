@@ -27,6 +27,7 @@ import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/models/desktop_render_texture.dart';
 import 'package:flutter_hbb/models/terminal_model.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
+import 'package:flutter_hbb/utils/display_windows.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_hbb/utils/http_service.dart' as http;
 import 'package:tuple/tuple.dart';
@@ -1506,6 +1507,47 @@ class FfiModel with ChangeNotifier {
     if (!isCache) {
       tryUseAllMyDisplaysForTheRemoteSession(peerId);
     }
+    if (isDesktop && connType == ConnType.defaultConn) {
+      armDisplayWindowReports();
+    }
+  }
+
+  /// Opens every stored display window of `peerId` (`loadDisplayWindows()`) that the peer still has: the window that
+  /// opened the connection switches to the lowest one, every other one opens in its own window. Returns false when
+  /// no stored display exists on the peer.
+  Future<bool> _tryRestoreDisplayWindows(String peerId) async {
+    final ffi = parent.target;
+    if (ffi == null || !isDesktop || ffi.connType != ConnType.defaultConn) {
+      return false;
+    }
+    final stored = loadDisplayWindows(peerId);
+    final valid = stored.keys
+        .where((d) =>
+            (d >= 0 && d < _pi.displays.length) ||
+            (d == kAllDisplayValue &&
+                _pi.isSupportMultiDisplay &&
+                _pi.displays.length > 1))
+        .toList()
+      ..sort();
+    if (valid.isEmpty) {
+      return false;
+    }
+    final first = valid.first;
+    if (_pi.currentDisplay != first) {
+      openMonitorInTheSameTab(first, ffi, _pi, recordSelection: false);
+    }
+    // `restoreWindowPosition()` gave this window the state of the lowest stored display, which the peer may no
+    // longer have.
+    final lowestStored = (stored.keys.toList()..sort()).first;
+    if (first != lowestStored) {
+      await applyDisplayWindowState(stateGlobal.windowId, stored[first]!);
+    }
+    if (_pi.isSupportMultiDisplay) {
+      for (final d in valid.skip(1)) {
+        openMonitorInNewTabOrWindow(d, peerId, _pi);
+      }
+    }
+    return true;
   }
 
   checkDesktopKeyboardMode() async {
@@ -1544,6 +1586,9 @@ class FfiModel with ChangeNotifier {
       return;
     }
     autoOpenDisplaysPending = false;
+    if (await _tryRestoreDisplayWindows(peerId)) {
+      return;
+    }
     if (bind.sessionGetUseAllMyDisplaysForTheRemoteSession(
             sessionId: sessionId) !=
         'Y') {

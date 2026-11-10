@@ -19,6 +19,7 @@ import 'package:scroll_pos/scroll_pos.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../../utils/display_windows.dart';
 import '../../utils/multi_window_manager.dart';
 
 const double _kTabBarHeight = kDesktopRemoteTabBarHeight;
@@ -395,6 +396,7 @@ class _DesktopTabState extends State<DesktopTab>
   void onWindowMaximize() {
     stateGlobal.setMinimized(false);
     _setMaximized(true);
+    _saveFrame();
     super.onWindowMaximize();
   }
 
@@ -402,6 +404,7 @@ class _DesktopTabState extends State<DesktopTab>
   void onWindowUnmaximize() {
     stateGlobal.setMinimized(false);
     _setMaximized(false);
+    _saveFrame();
     super.onWindowUnmaximize();
   }
 
@@ -412,6 +415,13 @@ class _DesktopTabState extends State<DesktopTab>
       } else if (kWindowType != null && kWindowId != null) {
         await saveWindowPosition(kWindowType!,
             windowId: kWindowId, flush: flush);
+        if (kWindowType == WindowType.RemoteDesktop) {
+          if (flush ?? false) {
+            await reportDisplayWindowNow();
+          } else {
+            reportDisplayWindowSoon();
+          }
+        }
       }
     } catch (e) {
       debugPrint('Error saving window position: $e');

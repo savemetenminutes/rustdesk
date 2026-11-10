@@ -109,7 +109,7 @@ class RustDeskMultiWindowManager {
     final f = _monitorSessionQueue.then((_) => _openMonitorSession(
         windowId, peerId, display, displayCount, screenRect, windowType));
     _monitorSessionQueue = f.catchError((e) {
-      debugPrint('openMonitorSession failed: $e');
+      displayWindowsLog('openMonitorSession peer=$peerId display=$display failed: $e');
     });
     return f;
   }
@@ -122,13 +122,22 @@ class RustDeskMultiWindowManager {
         'windows=$windowIDs inactive=$_inactiveWindows');
     if (windowIDs.length > 1) {
       for (final windowId in windowIDs) {
-        if (await DesktopMultiWindow.invokeMethod(
-            windowId,
-            kWindowEventActiveDisplaySession,
-            jsonEncode({
-              'id': peerId,
-              'display': display,
-            }))) {
+        // A window that fails to answer (still starting, or its handler throws) does not show the display; the
+        // error MUST NOT abort opening it.
+        bool shown = false;
+        try {
+          shown = await DesktopMultiWindow.invokeMethod(
+                  windowId,
+                  kWindowEventActiveDisplaySession,
+                  jsonEncode({
+                    'id': peerId,
+                    'display': display,
+                  })) ==
+              true;
+        } catch (e) {
+          displayWindowsLog('openMonitorSession peer=$peerId display=$display: window $windowId did not answer: $e');
+        }
+        if (shown) {
           displayWindowsLog('openMonitorSession peer=$peerId display=$display: already shown in window $windowId');
           return;
         }

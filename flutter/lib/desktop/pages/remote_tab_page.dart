@@ -68,10 +68,10 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     _isMovedTab = tabWindowId != null && display == null;
     registerDisplayWindowSessions(() => tabController.state.value.tabs
             .where((tab) => tab.page is RemotePage)
-            .map((tab) => (tab.key, (tab.page as RemotePage).ffi))
-            .where((e) => e.$2.ffiModel.pi.isSet.value)
+            .map((tab) => (tab.key, (tab.page as RemotePage).ffiOrNull))
+            .where((e) => e.$2 != null && e.$2!.ffiModel.pi.isSet.value)
             .map((e) {
-          final ffi = e.$2;
+          final ffi = e.$2!;
           final key = ffi.sessionId.toString();
           final c = ffi.canvasModel;
           return DisplayWindowSession(e.$1, ffi.ffiModel.pi.currentDisplay,

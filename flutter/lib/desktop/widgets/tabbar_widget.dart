@@ -188,11 +188,26 @@ class DesktopTabController {
     for (int i = 0; i < state.value.tabs.length; i++) {
       final tab = state.value.tabs[i];
       if (tab.key == key) {
-        final ffi = isCamera
-            ? (tab.page as ViewCameraPage).ffi
-            : (tab.page as RemotePage).ffi;
-        if (ffi.ffiModel.pi.currentDisplay == display) {
-          return jumpTo(i, callOnSelected: true);
+        // A tab added a moment ago has no page state yet (`RemotePage.ffi` would throw): its display is the one it
+        // was opened with.
+        int? current;
+        if (isCamera) {
+          try {
+            current = (tab.page as ViewCameraPage).ffi.ffiModel.pi.currentDisplay;
+          } catch (_) {
+            current = null;
+          }
+        } else {
+          final page = tab.page as RemotePage;
+          current = page.ffiOrNull?.ffiModel.pi.currentDisplay ?? page.display;
+        }
+        if (current == display) {
+          try {
+            return jumpTo(i, callOnSelected: true);
+          } catch (_) {
+            // The tab exists but cannot be selected yet; the display is shown.
+            return true;
+          }
         }
       }
     }

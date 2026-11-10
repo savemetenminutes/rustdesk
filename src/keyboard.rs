@@ -690,13 +690,18 @@ fn start_grab_loop() {
                 return None;
             }
 
+            // A panic unwinding out of the hook callback would end the hook thread, and with it every key to the
+            // session: it is caught and the event takes the default path.
             #[cfg(all(feature = "flutter", target_os = "windows"))]
-            let excluded = exclude::on_hook_event(
-                &event,
-                key,
-                is_press,
-                KEYBOARD_HOOKED.load(Ordering::SeqCst),
-            );
+            let excluded = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                exclude::on_hook_event(&event, key, is_press, KEYBOARD_HOOKED.load(Ordering::SeqCst))
+            })) {
+                Ok(r) => r,
+                Err(_) => {
+                    log::error!("[kbd] exclude hook panicked on {:?}", key);
+                    None
+                }
+            };
             #[cfg(not(all(feature = "flutter", target_os = "windows")))]
             let excluded: Option<Option<Event>> = None;
 

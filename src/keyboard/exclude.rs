@@ -333,10 +333,19 @@ fn send_remote_mask(mode: &str) {
 
 /// Releases every held modifier on the remote PC, masked when `Alt` or `Win` is among them.
 fn release_remote_mods(mode: &str, state: &HookState) {
-    if state.held_bits() & (MOD_ALT | MOD_WIN) != 0 {
+    release_remote_held(mode, &state.held.values().cloned().collect::<Vec<_>>());
+}
+
+/// Releases the modifiers of `held` (their press events) on the remote PC, masked when `Alt` or `Win` is among them.
+fn release_remote_held(mode: &str, held: &[Event]) {
+    let bits = held.iter().fold(0u8, |b, e| match e.event_type {
+        EventType::KeyPress(k) => b | mod_bit(k),
+        _ => b,
+    });
+    if bits & (MOD_ALT | MOD_WIN) != 0 {
         send_remote_mask(mode);
     }
-    for ev in state.held.values() {
+    for ev in held {
         let mut ev = ev.clone();
         if let EventType::KeyPress(k) = ev.event_type {
             ev.event_type = EventType::KeyRelease(k);
@@ -363,7 +372,16 @@ fn inject_local(state: &mut HookState, position_code: u32, is_press: bool) {
 /// `None` swallows it locally), `None` to leave it to the default path.
 #[cfg(all(feature = "flutter", target_os = "windows"))]
 pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> Option<Option<Event>> {
-    let mut state = STATE.lock().unwrap();
+    // While this thread waits in `CallNextHookEx` (`probe_next_hooks()`), Windows can deliver another keyboard event to
+    // it (e.g. one a later hook injects): that nested call MUST take the default path and MUST NOT wait for `STATE`,
+    // which would hang the hook thread for good (Windows then stops calling the hook: no key reaches the session).
+    if IN_PROBE.with(|p| p.get()) {
+        return None;
+    }
+    let Ok(mut state) = STATE.try_lock() else {
+        hbb_common::log::warn!("keyboard exclude: hook state busy, default path");
+        return None;
+    };
     while state
         .expected
         .front()
@@ -489,7 +507,9 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
             key: Some(key),
         };
         if !cur_exclude_list().contains(&chord) {
-            return probe_next_hooks(&mut state, event, true);
+            let probe = ProbeInput::from_state(&state);
+            drop(state);
+            return probe_next_hooks(probe, event, true);
         }
         let mode = super::get_keyboard_mode();
         release_remote_mods(&mode, &state);
@@ -531,9 +551,36 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
     reset(&mut *state);
     if is_press {
         // A modifier press: the hooks behind this one track modifier state from it.
-        return probe_next_hooks(&mut state, event, false);
+        let probe = ProbeInput::from_state(&state);
+        drop(state);
+        return probe_next_hooks(probe, event, false);
     }
     None
+}
+
+thread_local! {
+    /// True while this thread is inside `CallNextHookEx` in `probe_next_hooks()`.
+    static IN_PROBE: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
+/// What `probe_next_hooks()` needs from `HookState`, taken before the `STATE` guard is dropped.
+struct ProbeInput {
+    held: Vec<Event>,
+    alt: bool,
+    ctrl: bool,
+}
+
+impl ProbeInput {
+    fn from_state(state: &HookState) -> Self {
+        ProbeInput {
+            held: state.held.values().cloned().collect(),
+            alt: state.held.keys().any(|k| matches!(k, Key::Alt | Key::AltGr)),
+            ctrl: state
+                .held
+                .keys()
+                .any(|k| matches!(k, Key::ControlLeft | Key::ControlRight)),
+        }
+    }
 }
 
 /// Hands a press that the grabbed session would take to the keyboard hooks installed before this one
@@ -548,13 +595,10 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
 /// return value MUST then be `Some(None)` or the default path's `None` for a press, both of which make rdev return
 /// without calling the next hook a second time.
 #[cfg(target_os = "windows")]
-fn probe_next_hooks(state: &mut HookState, event: &Event, is_main_key: bool) -> Option<Option<Event>> {
+fn probe_next_hooks(probe: ProbeInput, event: &Event, is_main_key: bool) -> Option<Option<Event>> {
     use winapi::um::winuser::{CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_SYSKEYDOWN};
-    let alt = state.held.keys().any(|k| matches!(k, Key::Alt | Key::AltGr));
-    let ctrl = state
-        .held
-        .keys()
-        .any(|k| matches!(k, Key::ControlLeft | Key::ControlRight));
+    let alt = probe.alt;
+    let ctrl = probe.ctrl;
     let pos = event.position_code;
     let mut flags = 0u32;
     if (pos >> 8) == 0xE0 {
@@ -571,6 +615,7 @@ fn probe_next_hooks(state: &mut HookState, event: &Event, is_main_key: bool) -> 
         dwExtraInfo: event.extra_data,
     };
     let msg = if alt && !ctrl { WM_SYSKEYDOWN } else { WM_KEYDOWN };
+    IN_PROBE.with(|p| p.set(true));
     let suppressed = unsafe {
         CallNextHookEx(
             std::ptr::null_mut(),
@@ -579,16 +624,17 @@ fn probe_next_hooks(state: &mut HookState, event: &Event, is_main_key: bool) -> 
             &mut data as *mut KBDLLHOOKSTRUCT as isize,
         )
     } != 0;
+    IN_PROBE.with(|p| p.set(false));
     if !suppressed {
         return None;
     }
-    hbb_common::log::debug!(
+    hbb_common::log::info!(
         "[kbd] vk=0x{:x} pos=0x{:x}: swallowed by a later keyboard hook (hotkey), not sent",
         event.platform_code,
         pos
     );
     if is_main_key {
-        release_remote_mods(&super::get_keyboard_mode(), state);
+        release_remote_held(&super::get_keyboard_mode(), &probe.held);
     }
     Some(None)
 }

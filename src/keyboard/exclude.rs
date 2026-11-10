@@ -383,6 +383,43 @@ thread_local! {
     static REENTERED: std::cell::Cell<u32> = std::cell::Cell::new(0);
 }
 
+/// `VK_PACKET`: a `SendInput` event with `KEYEVENTF_UNICODE` (AutoHotkey types characters missing from the current
+/// layout this way); its scan code field holds a UTF-16 code unit, not a key position.
+const VK_PACKET: u32 = 0xE7;
+
+thread_local! {
+    /// High surrogate of a character split over two `VK_PACKET` events.
+    static PENDING_HIGH_SURROGATE: std::cell::Cell<Option<u16>> = std::cell::Cell::new(None);
+}
+
+/// Sends the character of a grabbed `VK_PACKET` key-down to the remote PC as text (`KeyEvent.seq`, legacy mode,
+/// which the controlled side types with `process_seq()` whatever the session's keyboard mode); swallows the event
+/// locally. Key-ups carry the same character and are only swallowed.
+fn send_packet_char(event: &Event, is_press: bool) -> Option<Event> {
+    if !is_press {
+        return None;
+    }
+    let unit = (event.position_code & 0xFFFF) as u16;
+    let text = if (0xD800..0xDC00).contains(&unit) {
+        PENDING_HIGH_SURROGATE.with(|p| p.set(Some(unit)));
+        return None;
+    } else if (0xDC00..0xE000).contains(&unit) {
+        match PENDING_HIGH_SURROGATE.with(|p| p.take()) {
+            Some(high) => String::from_utf16_lossy(&[high, unit]),
+            None => return None,
+        }
+    } else {
+        String::from_utf16_lossy(&[unit])
+    };
+    let mut key_event = base::message_proto::KeyEvent::new();
+    key_event.set_seq(text);
+    key_event.down = true;
+    key_event.press = true;
+    key_event.mode = base::message_proto::KeyboardMode::Legacy.into();
+    super::send_key_event(&key_event);
+    None
+}
+
 /// Whether some program on this PC has registered `mods` + virtual key `vk` as a global hotkey (`RegisterHotKey`
 /// fails with `ERROR_HOTKEY_ALREADY_REGISTERED`). Such a hotkey fires only when the keys reach this PC's input
 /// system, which the grabbed session prevents; AutoHotkey registers its plain hotkeys this way.
@@ -426,6 +463,9 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
     }
     if IN_PROBE.with(|p| p.get()) {
         return None;
+    }
+    if hooked && event.platform_code == VK_PACKET {
+        return Some(send_packet_char(event, is_press));
     }
     let Ok(mut state) = STATE.try_lock() else {
         hbb_common::log::warn!("keyboard exclude: hook state busy, default path");

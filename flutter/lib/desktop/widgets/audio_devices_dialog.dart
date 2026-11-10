@@ -19,6 +19,9 @@ const String kOptionAudioInputDevice = 'audio-input-device';
 /// default input device of the remote PC.
 const String kAudioInputOverridePrefix = '=';
 
+/// Session toggle option behind "Mute" (`toolbarDisplayToggle()`).
+const String kOptionToggleDisableAudio = 'disable-audio';
+
 class _RemoteInputs {
   final List<String> devices;
   final String ownSetting;
@@ -58,6 +61,8 @@ void audioDevicesDialog(FFI ffi) async {
   } catch (e) {
     debugPrint('Failed to parse output devices: $e');
   }
+  var muted = bind.sessionGetToggleOptionSync(
+      sessionId: sessionId, arg: kOptionToggleDisableAudio);
   _RemoteInputs? remote;
   var fetchStarted = false;
   var fetchDone = false;
@@ -152,6 +157,19 @@ void audioDevicesDialog(FFI ffi) async {
         height: 480,
         child: ListView(
           children: [
+            CheckboxListTile(
+              dense: true,
+              title: Text(translate('Mute')),
+              value: muted,
+              onChanged: (v) async {
+                if (v == null || v == muted) return;
+                await bind.sessionToggleOption(
+                    sessionId: sessionId, value: kOptionToggleDisableAudio);
+                setState(() => muted = bind.sessionGetToggleOptionSync(
+                    sessionId: sessionId, arg: kOptionToggleDisableAudio));
+              },
+            ),
+            const Divider(),
             Text('Output on this PC',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             ...outputItems,

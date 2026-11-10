@@ -2034,7 +2034,13 @@ class _DisplayMenuState extends State<_DisplayMenu> {
     return futureBuilder(
         future: toolbarDisplayToggle(context, id, ffi),
         hasData: (data) {
-          final v = data as List<TToggleMenu>;
+          // Mute lives in the speaker button's Audio dialog (`audioDevicesDialog()`) where that button exists; the
+          // entry stays in `toolbarDisplayToggle()` so its keyboard shortcut is still registered.
+          final v = (data as List<TToggleMenu>)
+              .where((e) => !(isWindows &&
+                  ffi.connType == ConnType.defaultConn &&
+                  e.actionId == kShortcutActionToggleMute))
+              .toList();
           if (v.isEmpty) return Offstage();
           return Column(
               children: v

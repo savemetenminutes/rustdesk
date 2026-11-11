@@ -155,6 +155,53 @@ unsafe fn set_default_recording(ids: &[Option<String>; 3]) -> windows::core::Res
     Ok(())
 }
 
+/// Download of VB-CABLE (https://vb-audio.com/Cable/): driver pack with `VBCABLE_Setup_x64.exe`.
+pub const VB_CABLE_PACK_URL: &str = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
+
+/// Installs virtual microphone driver `driver` ("vb-cable"): downloads the driver pack into the temp directory,
+/// extracts it with `Expand-Archive` and runs `VBCABLE_Setup_x64.exe -i -h`. Windows asks the user of this side to
+/// allow the signed driver. Blocking; returns once the installer exits.
+pub fn install(driver: &str) -> hbb_common::ResultType<()> {
+    use hbb_common::anyhow::{anyhow, bail};
+    if driver != "vb-cable" {
+        bail!("unknown virtual microphone driver {driver:?}");
+    }
+    let dir = std::env::temp_dir().join("rustdesk-virtual-microphone");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let zip = dir.join("VBCABLE_Driver_Pack.zip");
+    log::info!("Downloading {VB_CABLE_PACK_URL}");
+    let bytes = crate::hbbs_http::create_http_client_with_url(VB_CABLE_PACK_URL)
+        .get(VB_CABLE_PACK_URL)
+        .send()?
+        .error_for_status()?
+        .bytes()?;
+    std::fs::write(&zip, &bytes)?;
+    let status = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!(
+                "Expand-Archive -Force -LiteralPath '{}' -DestinationPath '{}'",
+                zip.display(),
+                dir.display()
+            ),
+        ])
+        .status()?;
+    if !status.success() {
+        bail!("Expand-Archive exited with {status}");
+    }
+    let setup = dir.join("VBCABLE_Setup_x64.exe");
+    log::info!("Running {} -i -h", setup.display());
+    let status = std::process::Command::new(&setup).args(["-i", "-h"]).status()?;
+    log::info!("VB-CABLE setup exited with {status}");
+    if detect().is_none() {
+        return Err(anyhow!("the installer exited ({status}) and no virtual microphone is present"));
+    }
+    Ok(())
+}
+
 /// Makes the virtual microphone the default recording device for connection `conn_id`; returns the pair, whose
 /// `playback_name` the connection's playback thread MUST open. `None` when no virtual microphone is installed.
 pub fn activate(conn_id: i32) -> Option<Pair> {

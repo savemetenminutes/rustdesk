@@ -81,6 +81,7 @@ pub fn remote_inputs_json(peer_id: &str) -> String {
             "own_setting": inputs.own_setting,
             "system_sound": inputs.system_sound,
             "virtual_microphone": inputs.virtual_microphone,
+            "virtual_microphone_install": inputs.virtual_microphone_install,
         })
         .to_string(),
         None => "".to_owned(),
@@ -94,6 +95,15 @@ pub fn clear_remote_inputs(peer_id: &str) {
 pub fn request_inputs_message() -> Message {
     let mut misc = Misc::new();
     misc.set_request_audio_inputs(true);
+    let mut msg = Message::new();
+    msg.set_misc(misc);
+    msg
+}
+
+/// `Misc.install_virtual_microphone` for driver `driver` ("vb-cable").
+pub fn install_virtual_microphone_message(driver: &str) -> Message {
+    let mut misc = Misc::new();
+    misc.set_install_virtual_microphone(driver.to_owned());
     let mut msg = Message::new();
     msg.set_misc(misc);
     msg

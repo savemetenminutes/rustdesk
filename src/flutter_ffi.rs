@@ -817,6 +817,19 @@ pub fn session_get_remote_audio_inputs(session_id: SessionID) -> SyncReturn<Stri
     SyncReturn("".to_owned())
 }
 
+/// Asks the peer to install virtual microphone driver `driver` ("vb-cable"); the peer's following `AudioInputs`
+/// report the outcome (`virtual_microphone_install`).
+pub fn session_install_remote_virtual_microphone(session_id: SessionID, driver: String) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        crate::client::Interface::send(
+            &*session,
+            crate::client::Data::Message(
+                crate::client::audio_devices::install_virtual_microphone_message(&driver),
+            ),
+        );
+    }
+}
+
 /// JSON `{"playing_output": "...", "output": {..}, "remote_input": {..}, "host_input": {..}}`: the output device that
 /// plays and the stored volumes (percent) of the session's peer.
 pub fn session_get_audio_volumes(session_id: SessionID) -> SyncReturn<String> {

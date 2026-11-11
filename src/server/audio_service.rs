@@ -58,16 +58,19 @@ pub fn get_capture_devices() -> Vec<String> {
     crate::audio_device_thread::run(|| {
         use cpal::traits::{DeviceTrait, HostTrait};
         let mut out = Vec::new();
-        if let Ok(devices) = cpal::default_host().devices() {
-            for device in devices {
-                if device.default_input_config().is_err() {
-                    continue;
-                }
-                if let Ok(name) = device.name() {
-                    out.push(name);
+        match cpal::default_host().devices() {
+            Ok(devices) => {
+                for device in devices {
+                    let name = device.name().unwrap_or_default();
+                    match device.default_input_config() {
+                        Ok(_) => out.push(name),
+                        Err(e) => log::debug!("Capture device list: \"{name}\" has no input configuration: {e}"),
+                    }
                 }
             }
+            Err(e) => log::warn!("Capture device list: device enumeration failed: {e}"),
         }
+        log::info!("Capture device list: {out:?}");
         out
     })
     .unwrap_or_default()

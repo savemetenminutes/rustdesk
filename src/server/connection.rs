@@ -4101,6 +4101,39 @@ impl Connection {
                             self.send(msg_out).await;
                         }
                     }
+                    #[cfg(windows)]
+                    Some(misc::Union::InstallVirtualMicrophone(driver)) => {
+                        if self.audio {
+                            let mut inner = self.inner.clone();
+                            let send_inputs = move |inner: &mut ConnInner, status: String| {
+                                let mut misc = Misc::new();
+                                misc.set_audio_inputs(AudioInputs {
+                                    devices: super::audio_service::get_capture_devices(),
+                                    own_setting: Config::get_option("audio-input"),
+                                    system_sound: super::audio_service::empty_input_is_system_sound(),
+                                    virtual_microphone: super::virtual_microphone::detect()
+                                        .map(|p| p.recording_name)
+                                        .unwrap_or_default(),
+                                    virtual_microphone_install: status,
+                                    ..Default::default()
+                                });
+                                let mut msg = Message::new();
+                                msg.set_misc(misc);
+                                inner.send(Arc::new(msg));
+                            };
+                            send_inputs(&mut inner, "installing".to_owned());
+                            std::thread::spawn(move || {
+                                let status = match super::virtual_microphone::install(&driver) {
+                                    Ok(()) => "installed".to_owned(),
+                                    Err(e) => {
+                                        log::error!("Virtual microphone install failed: {e}");
+                                        format!("failed: {e}")
+                                    }
+                                };
+                                send_inputs(&mut inner, status);
+                            });
+                        }
+                    }
                     Some(misc::Union::HostMicrophone(h)) => {
                         if self.audio {
                             self.set_host_microphone(h.active);

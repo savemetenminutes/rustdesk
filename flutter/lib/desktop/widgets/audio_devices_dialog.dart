@@ -35,8 +35,26 @@ class _RemoteInputs {
   final bool systemSound;
   // Recording device name of the remote PC's virtual microphone; "" when none is installed.
   final String virtualMicrophone;
-  _RemoteInputs(
-      this.devices, this.ownSetting, this.systemSound, this.virtualMicrophone);
+  // Outcome of the last driver install request: "", "installing", "installed", "failed: <reason>".
+  final String install;
+  _RemoteInputs(this.devices, this.ownSetting, this.systemSound,
+      this.virtualMicrophone, this.install);
+}
+
+_RemoteInputs? _parseRemoteInputs(String raw) {
+  if (raw.isEmpty) return null;
+  try {
+    final m = jsonDecode(raw);
+    return _RemoteInputs(
+        (m['devices'] as List).cast<String>(),
+        m['own_setting'] as String,
+        m['system_sound'] == true,
+        (m['virtual_microphone'] ?? '') as String,
+        (m['virtual_microphone_install'] ?? '') as String);
+  } catch (e) {
+    debugPrint('Failed to parse remote audio inputs "$raw": $e');
+    return null;
+  }
 }
 
 Future<_RemoteInputs?> _fetchRemoteInputs(FFI ffi) async {
@@ -44,19 +62,7 @@ Future<_RemoteInputs?> _fetchRemoteInputs(FFI ffi) async {
   for (var i = 0; i < 30; i++) {
     await Future.delayed(const Duration(milliseconds: 100));
     final raw = bind.sessionGetRemoteAudioInputs(sessionId: ffi.sessionId);
-    if (raw.isNotEmpty) {
-      try {
-        final m = jsonDecode(raw);
-        return _RemoteInputs(
-            (m['devices'] as List).cast<String>(),
-            m['own_setting'] as String,
-            m['system_sound'] == true,
-            (m['virtual_microphone'] ?? '') as String);
-      } catch (e) {
-        debugPrint('Failed to parse remote audio inputs "$raw": $e');
-        return null;
-      }
-    }
+    if (raw.isNotEmpty) return _parseRemoteInputs(raw);
   }
   return null;
 }
@@ -146,6 +152,30 @@ void audioDevicesDialog(FFI ffi) async {
       }
       setState(() => muted = bind.sessionGetToggleOptionSync(
           sessionId: sessionId, arg: kOptionToggleDisableAudio));
+    }
+
+    // Asks the remote PC to install VB-CABLE, then follows the `AudioInputs` its installer thread sends.
+    void installVirtualMicrophone() {
+      bind.sessionInstallRemoteVirtualMicrophone(
+          sessionId: sessionId, driver: 'vb-cable');
+      Timer.periodic(const Duration(seconds: 1), (t) {
+        if (closed || t.tick > 900) {
+          t.cancel();
+          return;
+        }
+        final r = _parseRemoteInputs(
+            bind.sessionGetRemoteAudioInputs(sessionId: sessionId));
+        if (r == null) return;
+        try {
+          setState(() => remote = r);
+        } catch (e) {
+          t.cancel();
+          return;
+        }
+        if (r.install == 'installed' || r.install.startsWith('failed')) {
+          t.cancel();
+        }
+      });
     }
 
     void setHostInput(String v) {
@@ -261,12 +291,30 @@ void audioDevicesDialog(FFI ffi) async {
                 child: Text('${(b['current'] as num).toStringAsFixed(1)} dB')),
           ],
         ),
+      if (r != null && virtualMic.isEmpty && r.install != 'installing')
+        RadioListTile<String>(
+          dense: true,
+          title: const Text(
+              'Select this option to install "VB-CABLE Virtual Audio Device" (https://vb-audio.com/Cable/) on the remote PC'),
+          value: 'install:vb-cable',
+          groupValue: hostInput,
+          onChanged: (_) => installVirtualMicrophone(),
+        ),
+      if (r != null && r.install.isNotEmpty)
+        ListTile(
+          dense: true,
+          title: Text(r.install == 'installing'
+              ? 'Installing VB-CABLE on the remote PC: allow the Windows driver prompt on its screen'
+              : r.install == 'installed'
+                  ? 'VB-CABLE is installed on the remote PC'
+                  : 'VB-CABLE install ${r.install}'),
+        ),
       ListTile(
         dense: true,
         title: Text(r == null
             ? "Checking the remote PC's virtual microphone..."
             : virtualMic.isEmpty
-                ? 'The remote PC has no virtual microphone: install VB-CABLE or Virtual Audio Driver there'
+                ? 'The remote PC has no virtual microphone'
                 : 'A device of this PC plays into "$virtualMic", which is then the remote PC\'s default recording device'),
       ),
     ];

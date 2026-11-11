@@ -882,6 +882,9 @@ message Misc {
     // Controller -> controlled: the controller's microphone stream (AudioFormat + AudioFrame) starts or stops; the
     // controlled side plays it into its virtual microphone.
     HostMicrophone host_microphone = 1004;
+    // Controller -> controlled: install the named virtual microphone driver ("vb-cable"); the controlled side answers
+    // with `AudioInputs` once the installer ends.
+    string install_virtual_microphone = 1005;
   }
 }
 
@@ -900,6 +903,9 @@ message AudioInputs {
   // Recording device name of the controlled side's virtual microphone (VB-CABLE, Virtual Audio Driver); "" when none
   // is installed.
   string virtual_microphone = 4;
+  // Outcome of the last `install_virtual_microphone` of this connection: "" none, "installing", "installed",
+  // "failed: <reason>".
+  string virtual_microphone_install = 5;
 }
 
 message AudioInputSelection {

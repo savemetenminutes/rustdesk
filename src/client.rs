@@ -5068,6 +5068,8 @@ pub trait Interface: Send + Clone + 'static + Sized {
 #[derive(Clone)]
 pub enum Data {
     Close,
+    /// This side's input device to stream into the controlled side's virtual microphone; "" ends the stream.
+    HostMicrophone(String),
     RejectInsecureConnection,
     Login((String, String, String, bool)),
     Message(Message),

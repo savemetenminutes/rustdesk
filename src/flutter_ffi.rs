@@ -776,6 +776,26 @@ pub fn session_set_audio_output_device(session_id: SessionID, device: String) {
     }
 }
 
+/// JSON array of this side's input device names.
+pub fn main_get_audio_input_devices() -> SyncReturn<String> {
+    SyncReturn(
+        serde_json::to_string(&crate::client::audio_devices::get_input_devices())
+            .unwrap_or_default(),
+    )
+}
+
+/// Stores this side's input device streamed into the peer's virtual microphone (peer option
+/// `audio-host-input-device`, "" = none) and starts or ends the stream.
+pub fn session_set_host_microphone(session_id: SessionID, device: String) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.set_option(
+            crate::client::audio_devices::OPTION_AUDIO_HOST_INPUT_DEVICE.to_owned(),
+            device.clone(),
+        );
+        crate::client::Interface::send(&*session, crate::client::Data::HostMicrophone(device));
+    }
+}
+
 /// Asks the peer for its capture devices; `session_get_remote_audio_inputs()` returns them once they arrive.
 pub fn session_request_remote_audio_inputs(session_id: SessionID) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {

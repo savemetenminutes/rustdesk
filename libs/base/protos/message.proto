@@ -879,7 +879,14 @@ message Misc {
     AudioInputs audio_inputs = 1002;
     // Controller -> controlled: the capture device for this connection.
     AudioInputSelection audio_input_selection = 1003;
+    // Controller -> controlled: the controller's microphone stream (AudioFormat + AudioFrame) starts or stops; the
+    // controlled side plays it into its virtual microphone.
+    HostMicrophone host_microphone = 1004;
   }
+}
+
+message HostMicrophone {
+  bool active = 1;
 }
 
 message AudioInputs {
@@ -890,6 +897,9 @@ message AudioInputs {
   string own_setting = 2;
   // Whether "" means System Sound on the controlled side.
   bool system_sound = 3;
+  // Recording device name of the controlled side's virtual microphone (VB-CABLE, Virtual Audio Driver); "" when none
+  // is installed.
+  string virtual_microphone = 4;
 }
 
 message AudioInputSelection {

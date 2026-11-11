@@ -17,6 +17,9 @@ use std::{
 pub const OPTION_AUDIO_OUTPUT_DEVICE: &str = "audio-output-device";
 pub const OPTION_AUDIO_INPUT_DEVICE: &str = "audio-input-device";
 pub const INPUT_OVERRIDE_PREFIX: &str = "=";
+/// Peer option: this side's input device streamed into the controlled side's virtual microphone; "" = none (the
+/// controlled side records from its own input as configured there).
+pub const OPTION_AUDIO_HOST_INPUT_DEVICE: &str = "audio-host-input-device";
 /// Peer option holding the saved mute state of a session: "Y" muted, "N" unmuted; absent or "" starts muted.
 pub const OPTION_AUDIO_MUTE_SAVED: &str = "audio-mute-saved";
 
@@ -72,6 +75,7 @@ pub fn remote_inputs_json(peer_id: &str) -> String {
             "devices": inputs.devices,
             "own_setting": inputs.own_setting,
             "system_sound": inputs.system_sound,
+            "virtual_microphone": inputs.virtual_microphone,
         })
         .to_string(),
         None => "".to_owned(),
@@ -85,6 +89,17 @@ pub fn clear_remote_inputs(peer_id: &str) {
 pub fn request_inputs_message() -> Message {
     let mut misc = Misc::new();
     misc.set_request_audio_inputs(true);
+    let mut msg = Message::new();
+    msg.set_misc(misc);
+    msg
+}
+
+/// `Misc.host_microphone`: the stream of this side's microphone into the virtual microphone starts or stops.
+pub fn host_microphone_message(active: bool) -> Message {
+    let mut host = HostMicrophone::new();
+    host.active = active;
+    let mut misc = Misc::new();
+    misc.set_host_microphone(host);
     let mut msg = Message::new();
     msg.set_misc(misc);
     msg
@@ -128,5 +143,31 @@ pub fn get_output_devices() -> Vec<String> {
 
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "ios"))]
 pub fn get_output_devices() -> Vec<String> {
+    vec![]
+}
+
+/// Input device names of this side (devices with an input configuration). Runs on `crate::audio_device_thread`.
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "ios")))]
+pub fn get_input_devices() -> Vec<String> {
+    crate::audio_device_thread::run(|| {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let mut out = Vec::new();
+        if let Ok(devices) = cpal::default_host().input_devices() {
+            for device in devices {
+                if device.default_input_config().is_err() {
+                    continue;
+                }
+                if let Ok(name) = device.name() {
+                    out.push(name);
+                }
+            }
+        }
+        out
+    })
+    .unwrap_or_default()
+}
+
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "ios"))]
+pub fn get_input_devices() -> Vec<String> {
     vec![]
 }

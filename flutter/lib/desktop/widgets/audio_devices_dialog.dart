@@ -25,11 +25,18 @@ const String kOptionToggleDisableAudio = 'disable-audio';
 /// Peer option with the saved mute state (Rust `audio_devices::OPTION_AUDIO_MUTE_SAVED`): "Y" / "N"; "" starts muted.
 const String kOptionAudioMuteSaved = 'audio-mute-saved';
 
+/// Peer option: this PC's input device streamed into the remote PC's virtual microphone (Rust
+/// `audio_devices::OPTION_AUDIO_HOST_INPUT_DEVICE`); "" = the remote PC records from its own input as configured there.
+const String kOptionAudioHostInputDevice = 'audio-host-input-device';
+
 class _RemoteInputs {
   final List<String> devices;
   final String ownSetting;
   final bool systemSound;
-  _RemoteInputs(this.devices, this.ownSetting, this.systemSound);
+  // Recording device name of the remote PC's virtual microphone; "" when none is installed.
+  final String virtualMicrophone;
+  _RemoteInputs(
+      this.devices, this.ownSetting, this.systemSound, this.virtualMicrophone);
 }
 
 Future<_RemoteInputs?> _fetchRemoteInputs(FFI ffi) async {
@@ -40,8 +47,11 @@ Future<_RemoteInputs?> _fetchRemoteInputs(FFI ffi) async {
     if (raw.isNotEmpty) {
       try {
         final m = jsonDecode(raw);
-        return _RemoteInputs((m['devices'] as List).cast<String>(),
-            m['own_setting'] as String, m['system_sound'] == true);
+        return _RemoteInputs(
+            (m['devices'] as List).cast<String>(),
+            m['own_setting'] as String,
+            m['system_sound'] == true,
+            (m['virtual_microphone'] ?? '') as String);
       } catch (e) {
         debugPrint('Failed to parse remote audio inputs "$raw": $e');
         return null;
@@ -63,6 +73,15 @@ void audioDevicesDialog(FFI ffi) async {
         .cast<String>();
   } catch (e) {
     debugPrint('Failed to parse output devices: $e');
+  }
+  var hostInput = await bind.sessionGetPeerOption(
+      sessionId: sessionId, name: kOptionAudioHostInputDevice);
+  List<String> hostInputs = [];
+  try {
+    hostInputs = (jsonDecode(bind.mainGetAudioInputDevices()) as List)
+        .cast<String>();
+  } catch (e) {
+    debugPrint('Failed to parse input devices: $e');
   }
   var muted = bind.sessionGetToggleOptionSync(
       sessionId: sessionId, arg: kOptionToggleDisableAudio);
@@ -105,6 +124,11 @@ void audioDevicesDialog(FFI ffi) async {
           sessionId: sessionId, arg: kOptionToggleDisableAudio));
     }
 
+    void setHostInput(String v) {
+      bind.sessionSetHostMicrophone(sessionId: sessionId, device: v);
+      setState(() => hostInput = v);
+    }
+
     void setInput(String v) {
       bind.sessionSetRemoteAudioInput(sessionId: sessionId, value: v);
       setState(() => input = v);
@@ -128,8 +152,26 @@ void audioDevicesDialog(FFI ffi) async {
             output, setOutput),
     ];
 
-    final List<Widget> inputItems;
     final r = remote;
+    final virtualMic = r?.virtualMicrophone ?? '';
+    final microphoneItems = <Widget>[
+      radio("Remote PC's own input, as configured there", '', hostInput,
+          setHostInput),
+      ...hostInputs.map((d) => radio(d, d, hostInput, setHostInput)),
+      if (hostInput.isNotEmpty && !hostInputs.contains(hostInput))
+        radio('$hostInput (not present, default input device is used)',
+            hostInput, hostInput, setHostInput),
+      ListTile(
+        dense: true,
+        title: Text(r == null
+            ? "Checking the remote PC's virtual microphone..."
+            : virtualMic.isEmpty
+                ? 'The remote PC has no virtual microphone: install VB-CABLE or Virtual Audio Driver there'
+                : 'A device of this PC plays into "$virtualMic", which is then the remote PC\'s default recording device'),
+      ),
+    ];
+
+    final List<Widget> inputItems;
     if (r == null) {
       inputItems = [
         ListTile(
@@ -169,7 +211,7 @@ void audioDevicesDialog(FFI ffi) async {
       title: Text('Audio devices'),
       content: SizedBox(
         width: 460,
-        height: 480,
+        height: 600,
         child: ListView(
           children: [
             Row(
@@ -211,7 +253,11 @@ void audioDevicesDialog(FFI ffi) async {
                 style: TextStyle(fontWeight: FontWeight.bold)),
             ...outputItems,
             const Divider(),
-            Text('Input on the remote PC',
+            Text('Microphone of the remote PC',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            ...microphoneItems,
+            const Divider(),
+            Text('Sound you hear from the remote PC (captured there)',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             ...inputItems,
           ],

@@ -47,12 +47,14 @@ unsafe fn boost_level(device_name: &str) -> Result<Option<IAudioVolumeLevel>> {
         // Breadth-first walk upstream from the adapter connector.
         let mut queue = vec![start];
         let mut visited = 0;
+        let mut names = vec![];
         while let Some(part) = queue.pop() {
             visited += 1;
             if visited > 64 {
                 break;
             }
             let part_name = part.GetName().map(|n| n.to_string().unwrap_or_default()).unwrap_or_default();
+            names.push(part_name.clone());
             if part_name.to_lowercase().contains("boost") {
                 let mut raw = std::ptr::null_mut();
                 if part.Activate(CLSCTX_ALL.0, &IAudioVolumeLevel::IID, Some(&mut raw)).is_ok() && !raw.is_null() {
@@ -67,6 +69,7 @@ unsafe fn boost_level(device_name: &str) -> Result<Option<IAudioVolumeLevel>> {
                 }
             }
         }
+        log::info!("Microphone boost: \"{device_name}\" has no boost node; topology parts: {names:?}");
         return Ok(None);
     }
     Ok(None)

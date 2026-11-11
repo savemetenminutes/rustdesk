@@ -37,6 +37,10 @@ const String kOptionAudioMuteSaved = 'audio-mute-saved';
 /// `audio_devices::OPTION_AUDIO_HOST_INPUT_DEVICE`); "" = none.
 const String kOptionAudioHostInputDevice = 'audio-host-input-device';
 
+/// Peer option: "Y" also plays this PC's streamed microphone on the remote PC's speakers (Rust
+/// `audio_devices::OPTION_AUDIO_HOST_INPUT_SPEAKERS`).
+const String kOptionAudioHostInputSpeakers = 'audio-host-input-speakers';
+
 /// What the remote PC reports (`AudioInputs`).
 class _RemoteInputs {
   /// Capture devices (what this PC hears).
@@ -114,6 +118,9 @@ void audioDevicesDialog(FFI ffi) async {
       sessionId: sessionId, name: kOptionAudioOutputDevice);
   var input = await bind.sessionGetPeerOption(
       sessionId: sessionId, name: kOptionAudioInputDevice);
+  var hostSpeakers = (await bind.sessionGetPeerOption(
+          sessionId: sessionId, name: kOptionAudioHostInputSpeakers)) ==
+      'Y';
   var hostInput = await bind.sessionGetPeerOption(
       sessionId: sessionId, name: kOptionAudioHostInputDevice);
   List<String> parseList(String raw) {
@@ -206,7 +213,7 @@ void audioDevicesDialog(FFI ffi) async {
           padding: const EdgeInsets.only(left: 48, right: 8, top: 2, bottom: 4),
           child: Row(
             children: [
-              SizedBox(width: 110, child: Text('Level')),
+              SizedBox(width: 110, child: Text(_t('Level'))),
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(3),
@@ -241,6 +248,18 @@ void audioDevicesDialog(FFI ffi) async {
     void setOutput(String v) {
       bind.sessionSetAudioOutputDevice(sessionId: sessionId, device: v);
       setState(() => output = v);
+      // Playback switches to the new device within a second; the volume row then belongs to that device.
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (closed) return;
+        try {
+          final fresh =
+              jsonDecode(bind.sessionGetAudioVolumes(sessionId: sessionId))
+                  as Map<String, dynamic>;
+          setState(() => volumes = fresh);
+        } catch (e) {
+          // The dialog was dismissed by `dialogManager`, or the session is gone.
+        }
+      });
     }
 
     void setInput(String v) {
@@ -314,7 +333,7 @@ void audioDevicesDialog(FFI ffi) async {
     // Software volume (0..200 %) of this PC, stored per peer and per device.
     Widget volumeSlider(String kind, String device) => slider(
             '$kind/$device',
-            'Volume',
+            _t('Volume'),
             0,
             200,
             storedVolume(kind, device).toDouble(),
@@ -335,7 +354,7 @@ void audioDevicesDialog(FFI ffi) async {
       final min = (b['min'] as num).toDouble();
       final max = (b['max'] as num).toDouble();
       final step = (b['step'] as num).toDouble();
-      return slider(key, 'Microphone boost', min, max,
+      return slider(key, _t('Microphone boost'), min, max,
           (b['current'] as num).toDouble(), (x) => '${x.toStringAsFixed(1)} dB',
           (x) {
         b['current'] = x;
@@ -384,16 +403,16 @@ void audioDevicesDialog(FFI ffi) async {
     // Output on this PC. The volume belongs to the device that plays ("Windows default" resolves to one).
     final playingOutput = (volumes['playing_output'] as String?) ?? '';
     final outputGroup = <Widget>[
-      heading('Output on this PC'),
-      radio('Windows default (follows changes)', '', output, setOutput,
+      heading(_t('Output on this PC')),
+      radio(_t('Windows default (follows changes)'), '', output, setOutput,
           whenSelected: [
-            if (playingOutput.isNotEmpty) note('Playing on "$playingOutput"'),
+            if (playingOutput.isNotEmpty) note(_t('Playing on "{}"', playingOutput)),
             volumeSlider('output', playingOutput),
           ]),
       ...outputs.map((d) => radio(d, d, output, setOutput,
           whenSelected: [volumeSlider('output', playingOutput.isEmpty ? d : playingOutput)])),
       if (output.isNotEmpty && !outputs.contains(output))
-        radio('$output (not present, Windows default is used)', output,
+        radio(_t('{} (not present, Windows default is used)', output), output,
             output, setOutput,
             whenSelected: [volumeSlider('output', playingOutput)]),
     ];
@@ -401,18 +420,18 @@ void audioDevicesDialog(FFI ffi) async {
     // Microphone of the remote PC: its recording devices; the selection is its default recording device.
     final r = remote;
     final virtualMic = r?.virtualMicrophone ?? '';
-    final List<Widget> remoteMicGroup = [heading('Microphone of the remote PC')];
+    final List<Widget> remoteMicGroup = [heading(_t('Microphone of the remote PC'))];
     if (r == null) {
       remoteMicGroup.add(note(fetchDone
-          ? 'The remote PC did not list its devices (it needs this build)'
-          : "Loading the remote PC's devices..."));
+          ? _t('The remote PC did not list its devices (it needs a newer RustDesk)')
+          : _t("Loading the remote PC's devices...")));
     } else {
       List<Widget> recordingControls(String device) => [
             levelMeter(remoteLevel <= 0 ? 0 : sqrtLevel(remoteLevel)),
             if (r.defaultRecordingVolume >= 0)
               slider(
                   'remote_recording/$device',
-                  'Volume',
+                  _t('Volume'),
                   0,
                   100,
                   r.defaultRecordingVolume.toDouble(),
@@ -432,33 +451,50 @@ void audioDevicesDialog(FFI ffi) async {
             whenSelected: recordingControls(d)));
       }
       for (final d in r.inactiveRecordingDevices) {
-        remoteMicGroup.add(radio('${d[0]} (${d[1]})', 'inactive:${d[0]}',
+        remoteMicGroup.add(radio('${d[0]} (${_t(d[1])})', 'inactive:${d[0]}',
             r.defaultRecording, null));
       }
       if (virtualMic.isEmpty && r.install != 'installing') {
         remoteMicGroup.add(radio(
-            'Select this option to install "VB-CABLE Virtual Audio Device" (https://vb-audio.com/Cable/)',
+            _t('install-vb-cable-tip'),
             'install:vb-cable',
             r.defaultRecording,
             (_) => installVirtualMicrophone(),
             wrap: true));
       }
       if (r.install == 'installing') {
-        remoteMicGroup.add(note(
-            'Installing VB-CABLE on the remote PC: allow the Windows driver prompt on its screen'));
+        remoteMicGroup.add(note(_t('installing-vb-cable-tip')));
       } else if (r.install.startsWith('failed')) {
-        remoteMicGroup.add(note('VB-CABLE install ${r.install}'));
+        remoteMicGroup.add(note(_t('VB-CABLE installation failed: {}',
+            r.install.replaceFirst(RegExp(r'^failed: ?'), ''))));
       }
     }
 
-    // Microphone of this PC, played into the remote PC's virtual microphone.
-    final hostEnabled = virtualMic.isNotEmpty && r?.defaultRecording == virtualMic;
+    // Microphone of this PC: played into the remote PC's virtual microphone, and on its speakers when checked.
+    final hostEnabled =
+        (virtualMic.isNotEmpty && r?.defaultRecording == virtualMic) ||
+            hostSpeakers;
     final hostGroup = <Widget>[
-      heading('Microphone of this PC (sent to the remote PC)'),
-      if (!hostEnabled)
-        note(
-            'The remote PC must have the virtual microphone installed and selected under "Microphone of the remote PC" to send a microphone of this PC'),
-      radio('None', '', hostInput, hostEnabled ? setHostInput : null),
+      heading(_t('Microphone of this PC (sent to the remote PC)')),
+      CheckboxListTile(
+        dense: true,
+        title: Text(_t("Play on the remote PC's speakers")),
+        value: hostSpeakers,
+        onChanged: (v) async {
+          if (v == null) return;
+          await bind.sessionPeerOption(
+              sessionId: sessionId,
+              name: kOptionAudioHostInputSpeakers,
+              value: v ? 'Y' : '');
+          setState(() => hostSpeakers = v);
+          if (hostInput.isNotEmpty) {
+            bind.sessionSetHostMicrophone(
+                sessionId: sessionId, device: hostInput);
+          }
+        },
+      ),
+      if (!hostEnabled) note(_t('remote-virtual-microphone-required-tip')),
+      radio(_t('None'), '', hostInput, setHostInput),
       ...hostInputs.map((d) => radio(
               d, d, hostInput, hostEnabled ? setHostInput : null,
               whenSelected: [
@@ -471,27 +507,27 @@ void audioDevicesDialog(FFI ffi) async {
                   }),
               ])),
       if (hostInput.isNotEmpty && !hostInputs.contains(hostInput))
-        radio('$hostInput (not present, default input device is used)',
+        radio(_t('{} (not present, default input device is used)', hostInput),
             hostInput, hostInput, hostEnabled ? setHostInput : null,
             whenSelected: [volumeSlider('host_input', hostInput)]),
     ];
 
     // Sound you hear from the remote PC: what the remote PC captures and sends to this PC.
     final List<Widget> hearGroup = [
-      heading('Sound you hear from the remote PC (captured there)')
+      heading(_t('Sound you hear from the remote PC (captured there)'))
     ];
     if (r == null) {
-      hearGroup.add(radio("Remote PC's own setting", '', input, setInput,
+      hearGroup.add(radio(_t("Remote PC's own setting"), '', input, setInput,
           whenSelected: [volumeSlider('remote_input', '')]));
     } else {
       final defaultLabel =
-          r.systemSound ? 'System Sound' : 'Default input device';
+          r.systemSound ? _t('System Sound') : _t('Default input device');
       final ownLabel = r.ownSetting.isEmpty ? defaultLabel : r.ownSetting;
       final selected = input.startsWith(kAudioInputOverridePrefix)
           ? input.substring(kAudioInputOverridePrefix.length)
           : null;
       hearGroup.addAll([
-        radio("Remote PC's own setting ($ownLabel)", '', input, setInput,
+        radio(_t("Remote PC's own setting ({})", ownLabel), '', input, setInput,
             whenSelected: [volumeSlider('remote_input', '')]),
         radio(defaultLabel, kAudioInputOverridePrefix, input, setInput,
             whenSelected: [
@@ -505,7 +541,7 @@ void audioDevicesDialog(FFI ffi) async {
         if (selected != null &&
             selected.isNotEmpty &&
             !r.devices.contains(selected))
-          radio('$selected (not present, default input device is used)',
+          radio(_t('{} (not present, default input device is used)', selected),
               input, input, setInput,
               whenSelected: [volumeSlider('remote_input', input)]),
       ]);
@@ -571,7 +607,7 @@ void audioDevicesDialog(FFI ffi) async {
     final panelHeight = window.height * 0.8 - 160;
 
     return CustomAlertDialog(
-      title: Text('Audio devices'),
+      title: Text(_t('Audio devices')),
       contentBoxConstraints: BoxConstraints(maxWidth: panelWidth),
       content: SizedBox(
         width: panelWidth,
@@ -585,9 +621,11 @@ void audioDevicesDialog(FFI ffi) async {
                   child: CheckboxListTile(
                     dense: true,
                     title: Text(translate('Mute')),
-                    subtitle: Text(muteSaved.isEmpty
+                    subtitle: Text(_t(muteSaved.isEmpty
                         ? 'Not saved: sessions start muted'
-                        : 'Saved: sessions start ${muteSaved == 'N' ? 'unmuted' : 'muted'}'),
+                        : muteSaved == 'N'
+                            ? 'Saved: sessions start unmuted'
+                            : 'Saved: sessions start muted')),
                     value: muted,
                     onChanged: (v) async {
                       if (v == null || v == muted) return;
@@ -621,7 +659,7 @@ void audioDevicesDialog(FFI ffi) async {
                   Expanded(
                     child: ListView(
                       children: [
-                        sectionTitle('OUTPUT'),
+                        sectionTitle(_t('Output').toUpperCase()),
                         ...outputGroup,
                         const Divider(),
                         ...hearGroup,
@@ -632,7 +670,7 @@ void audioDevicesDialog(FFI ffi) async {
                   Expanded(
                     child: ListView(
                       children: [
-                        sectionTitle('INPUT'),
+                        sectionTitle(_t('Input').toUpperCase()),
                         ...remoteMicGroup,
                         const Divider(),
                         ...hostGroup,
@@ -658,3 +696,9 @@ void audioDevicesDialog(FFI ffi) async {
 /// Square-root scale of a peak level (0..1) for the level indicator.
 double sqrtLevel(double level) =>
     level <= 0 ? 0 : math.sqrt(level.clamp(0.0, 1.0).toDouble());
+
+/// `translate(key)` with its `{}` replaced by `arg`.
+String _t(String key, [String? arg]) {
+  final text = translate(key);
+  return arg == null ? text : text.replaceAll('{}', arg);
+}

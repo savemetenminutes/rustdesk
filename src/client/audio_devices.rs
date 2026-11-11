@@ -20,6 +20,8 @@ pub const INPUT_OVERRIDE_PREFIX: &str = "=";
 /// Peer option: this side's input device streamed into the controlled side's virtual microphone; "" = none (the
 /// controlled side records from its own input as configured there).
 pub const OPTION_AUDIO_HOST_INPUT_DEVICE: &str = "audio-host-input-device";
+/// Peer option: "Y" also plays the streamed microphone on the controlled side's speakers.
+pub const OPTION_AUDIO_HOST_INPUT_SPEAKERS: &str = "audio-host-input-speakers";
 /// Peer option holding the saved mute state of a session: "Y" muted, "N" unmuted; absent or "" starts muted.
 pub const OPTION_AUDIO_MUTE_SAVED: &str = "audio-mute-saved";
 
@@ -163,9 +165,10 @@ pub fn install_virtual_microphone_message(driver: &str) -> Message {
 }
 
 /// `Misc.host_microphone`: the stream of this side's microphone into the virtual microphone starts or stops.
-pub fn host_microphone_message(active: bool) -> Message {
+pub fn host_microphone_message(active: bool, play_on_speakers: bool) -> Message {
     let mut host = HostMicrophone::new();
     host.active = active;
+    host.play_on_speakers = play_on_speakers;
     let mut misc = Misc::new();
     misc.set_host_microphone(host);
     let mut msg = Message::new();

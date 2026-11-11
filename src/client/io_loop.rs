@@ -80,9 +80,6 @@ pub struct Remote<T: InvokeUiSession> {
     stop_voice_call_sender: Option<std::sync::mpsc::Sender<()>>,
     /// Stops the stream of this side's microphone into the controlled side's virtual microphone.
     stop_host_microphone_sender: Option<std::sync::mpsc::Sender<()>>,
-    /// The stored microphone to stream once the peer reports its virtual microphone as its selected recording device:
-    /// a peer without one (or an older peer) would play the stream on its speakers.
-    pending_host_microphone: Option<String>,
     voice_call_request_timestamp: Option<NonZeroI64>,
     read_jobs: Vec<fs::TransferJob>,
     write_jobs: Vec<fs::TransferJob>,
@@ -164,7 +161,6 @@ impl<T: InvokeUiSession> Remote<T> {
             video_format: CodecFormat::Unknown,
             stop_voice_call_sender: None,
             stop_host_microphone_sender: None,
-            pending_host_microphone: None,
             voice_call_request_timestamp: None,
             elevation_requested: false,
             peer_info: Default::default(),
@@ -623,7 +619,12 @@ impl<T: InvokeUiSession> Remote<T> {
             s.send(()).ok();
         }
         allow_err!(
-            peer.send(&crate::client::audio_devices::host_microphone_message(!device.is_empty()))
+            peer.send(&crate::client::audio_devices::host_microphone_message(
+                !device.is_empty(),
+                self.handler.lc.read().unwrap().get_option(
+                    crate::client::audio_devices::OPTION_AUDIO_HOST_INPUT_SPEAKERS,
+                ) == "Y",
+            ))
                 .await
         );
         crate::client::audio_volume::set_capture_gain(100);
@@ -2020,11 +2021,7 @@ impl<T: InvokeUiSession> Remote<T> {
                                 crate::client::audio_devices::OPTION_AUDIO_HOST_INPUT_DEVICE,
                             );
                             if !host_input.is_empty() {
-                                self.pending_host_microphone = Some(host_input);
-                                allow_err!(
-                                    peer.send(&crate::client::audio_devices::request_inputs_message())
-                                        .await
-                                );
+                                self.set_host_microphone(host_input, peer).await;
                             }
                         }
 
@@ -2687,15 +2684,8 @@ impl<T: InvokeUiSession> Remote<T> {
                         crate::client::audio_devices::set_remote_recording_level(&peer_id, level);
                     }
                     Some(misc::Union::AudioInputs(inputs)) => {
-                        let virtual_selected = !inputs.virtual_microphone.is_empty()
-                            && inputs.default_recording == inputs.virtual_microphone;
                         let peer_id = self.handler.lc.read().unwrap().get_id().to_owned();
                         crate::client::audio_devices::set_remote_inputs(&peer_id, inputs);
-                        if let Some(device) = self.pending_host_microphone.take() {
-                            if virtual_selected {
-                                self.set_host_microphone(device, peer).await;
-                            }
-                        }
                     }
                     _ => {}
                 },

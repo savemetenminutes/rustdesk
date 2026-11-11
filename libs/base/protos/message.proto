@@ -896,6 +896,8 @@ message Misc {
 
 message HostMicrophone {
   bool active = 1;
+  // Also play the stream on the controlled side's speakers (default output device).
+  bool play_on_speakers = 2;
 }
 
 message AudioInputs {

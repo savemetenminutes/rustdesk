@@ -13,7 +13,7 @@
 use hbb_common::log;
 use std::ffi::c_void;
 use windows::{
-    core::{IUnknown, Interface, GUID, HRESULT, PCWSTR},
+    core::{IUnknown, Interface, GUID, HRESULT, PCWSTR, PWSTR},
     Win32::{
         Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
         Media::Audio::{
@@ -22,9 +22,13 @@ use windows::{
             DEVICE_STATEMASK_ALL, DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT,
             DEVICE_STATE_UNPLUGGED,
         },
-        System::Com::{
-            CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
-            STGM_READ,
+        Foundation::PROPERTYKEY,
+        System::{
+            Com::{
+                CoCreateInstance, CoInitializeEx, CoTaskMemAlloc, CoTaskMemFree,
+                StructuredStorage::PROPVARIANT, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
+            },
+            Variant::VT_LPWSTR,
         },
     },
 };
@@ -43,6 +47,15 @@ const IID_IPOLICY_CONFIG: GUID = GUID::from_u128(0xf8679f50_850a_41cf_9c72_430f2
 /// SetDeviceFormat, GetProcessingPeriod, SetProcessingPeriod, GetShareMode, SetShareMode, GetPropertyValue,
 /// SetPropertyValue (10).
 const SET_DEFAULT_ENDPOINT_SLOT: usize = 13;
+/// `IPolicyConfig::SetPropertyValue(device id, fx store, key, value)`.
+const SET_PROPERTY_VALUE_SLOT: usize = 12;
+
+/// The recording device's "Listen" tab (Sound control panel): `,1` "Listen to this device" (`VT_BOOL`), `,0` "Playback
+/// through this device" (`VT_LPWSTR` playback endpoint id; empty = Default Playback Device). Read from the registry of
+/// an endpoint after the tab was applied.
+const LISTEN_FMTID: GUID = GUID::from_u128(0x24dbb0fc_9311_4b3d_9cf0_18ff155639d4);
+const PKEY_LISTEN_ENABLED: PROPERTYKEY = PROPERTYKEY { fmtid: LISTEN_FMTID, pid: 1 };
+const PKEY_LISTEN_TARGET: PROPERTYKEY = PROPERTYKEY { fmtid: LISTEN_FMTID, pid: 0 };
 
 #[derive(Clone, Debug)]
 pub struct Pair {
@@ -63,6 +76,11 @@ pub struct RecordingState {
     pub virtual_microphone: Option<Pair>,
     /// Recording endpoints that are not active: `(name, "disabled" | "unplugged" | "not present")`, one per name.
     pub inactive: Vec<(String, String)>,
+    /// "Listen to this device" of `default` and its playback device name ("" = Default Playback Device).
+    pub default_listen: bool,
+    pub default_listen_target: String,
+    /// Active playback endpoints, for the listen target.
+    pub playback_devices: Vec<String>,
 }
 
 struct Endpoint {
@@ -167,6 +185,7 @@ unsafe fn recording_state_inner() -> windows::core::Result<RecordingState> {
     let playback = endpoints(eRender)?;
     let mut state = RecordingState {
         devices: recording.iter().map(|e| e.name.clone()).collect(),
+        playback_devices: playback.iter().map(|e| e.name.clone()).collect(),
         default_volume: -1,
         virtual_microphone: pair(&playback, &recording),
         inactive: inactive_recording().unwrap_or_default(),
@@ -179,8 +198,76 @@ unsafe fn recording_state_inner() -> windows::core::Result<RecordingState> {
                 state.default_volume = (level * 100.0).round() as i32;
             }
         }
+        if let Ok(store) = default.OpenPropertyStore(STGM_READ) {
+            if let Ok(v) = store.GetValue(&PKEY_LISTEN_ENABLED) {
+                state.default_listen = bool::try_from(&v).unwrap_or(false);
+            }
+            if let Ok(v) = store.GetValue(&PKEY_LISTEN_TARGET) {
+                let target_id = v.to_string();
+                state.default_listen_target = playback
+                    .iter()
+                    .find(|e| !target_id.is_empty() && e.id.eq_ignore_ascii_case(&target_id))
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+            }
+        }
     }
     Ok(state)
+}
+
+/// A `VT_LPWSTR` value (CoTaskMem string, freed when the `PROPVARIANT` drops).
+unsafe fn lpwstr_value(s: &str) -> PROPVARIANT {
+    let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
+    let mem = CoTaskMemAlloc(wide.len() * 2) as *mut u16;
+    let mut v = PROPVARIANT::default();
+    if mem.is_null() {
+        return v;
+    }
+    std::ptr::copy_nonoverlapping(wide.as_ptr(), mem, wide.len());
+    (*v.Anonymous.Anonymous).vt = VT_LPWSTR;
+    (*v.Anonymous.Anonymous).Anonymous.pwszVal = PWSTR(mem);
+    v
+}
+
+/// Sets "Listen to this device" of recording endpoint `name` and its playback device (`target`, a playback endpoint
+/// name; "" = Default Playback Device), as the Listen tab of the Sound control panel does.
+pub fn set_listen(name: &str, listen: bool, target: &str) {
+    let (name, target) = (name.to_owned(), target.to_owned());
+    crate::audio_device_thread::run(move || unsafe {
+        let result = (|| -> windows::core::Result<bool> {
+            let Some(endpoint) = find_recording(&name)? else {
+                return Ok(false);
+            };
+            let target_id = if target.is_empty() {
+                String::new()
+            } else {
+                endpoints(eRender)?
+                    .into_iter()
+                    .find(|e| e.name == target)
+                    .map(|e| e.id)
+                    .unwrap_or_default()
+            };
+            let unknown: IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)?;
+            let mut raw: *mut c_void = std::ptr::null_mut();
+            unknown.query(&IID_IPOLICY_CONFIG, &mut raw).ok()?;
+            let policy = IUnknown::from_raw(raw);
+            type SetPropertyValue =
+                unsafe extern "system" fn(*mut c_void, PCWSTR, i32, *const PROPERTYKEY, *const PROPVARIANT) -> HRESULT;
+            let vtable = *(policy.as_raw() as *const *const usize);
+            let set: SetPropertyValue = std::mem::transmute(*vtable.add(SET_PROPERTY_VALUE_SLOT));
+            let id: Vec<u16> = endpoint.id.encode_utf16().chain(std::iter::once(0)).collect();
+            let target_value = lpwstr_value(&target_id);
+            set(policy.as_raw(), PCWSTR(id.as_ptr()), 0, &PKEY_LISTEN_TARGET, &target_value).ok()?;
+            let enabled = PROPVARIANT::from(listen);
+            set(policy.as_raw(), PCWSTR(id.as_ptr()), 0, &PKEY_LISTEN_ENABLED, &enabled).ok()?;
+            Ok(true)
+        })();
+        match result {
+            Ok(true) => log::info!("Listen of \"{name}\" set to {listen} through {target:?}"),
+            Ok(false) => log::warn!("Recording device \"{name}\" is not present"),
+            Err(e) => log::error!("Failed to set Listen of \"{name}\": {e}"),
+        }
+    });
 }
 
 /// The recording devices, the default one with its volume and boost, and the virtual microphone.

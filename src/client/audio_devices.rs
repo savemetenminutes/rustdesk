@@ -20,17 +20,7 @@ pub const INPUT_OVERRIDE_PREFIX: &str = "=";
 /// Peer option: this side's input device streamed into the controlled side's virtual microphone; "" = none (the
 /// controlled side records from its own input as configured there).
 pub const OPTION_AUDIO_HOST_INPUT_DEVICE: &str = "audio-host-input-device";
-/// Peer option `{"<input device of this side>": true}`: the device's stream also plays on the controlled side's
-/// speakers.
-pub const OPTION_AUDIO_HOST_INPUT_SPEAKERS: &str = "audio-host-input-speakers";
 
-/// Whether input device `device` plays on the controlled side's speakers (`OPTION_AUDIO_HOST_INPUT_SPEAKERS` JSON).
-pub fn plays_on_speakers(option_json: &str, device: &str) -> bool {
-    serde_json::from_str::<std::collections::HashMap<String, bool>>(option_json)
-        .ok()
-        .and_then(|m| m.get(device).copied())
-        .unwrap_or(false)
-}
 /// Peer option holding the saved mute state of a session: "Y" muted, "N" unmuted; absent or "" starts muted.
 pub const OPTION_AUDIO_MUTE_SAVED: &str = "audio-mute-saved";
 
@@ -122,6 +112,9 @@ pub fn remote_inputs_json(peer_id: &str) -> String {
             "virtual_microphone_install": inputs.virtual_microphone_install,
             "recording_devices": inputs.recording_devices,
             "inactive_recording_devices": inputs.inactive_recording_devices,
+            "default_recording_listen": inputs.default_recording_listen,
+            "default_recording_listen_target": inputs.default_recording_listen_target,
+            "playback_devices": inputs.playback_devices,
             "default_recording": inputs.default_recording,
             "default_recording_volume": inputs.default_recording_volume,
             "default_recording_boost": inputs.default_recording_boost,
@@ -150,6 +143,7 @@ pub fn recording_device_control_message(
     set_default: bool,
     volume: i32,
     boost_db: Option<f32>,
+    listen: Option<(bool, String)>,
 ) -> Message {
     let mut c = RecordingDeviceControl::new();
     c.device = device.to_owned();
@@ -157,6 +151,11 @@ pub fn recording_device_control_message(
     c.volume = volume;
     c.set_boost = boost_db.is_some();
     c.boost_db = boost_db.unwrap_or_default();
+    if let Some((listen, target)) = listen {
+        c.set_listen = true;
+        c.listen = listen;
+        c.listen_target = target;
+    }
     let mut misc = Misc::new();
     misc.set_recording_device_control(c);
     let mut msg = Message::new();
@@ -174,10 +173,9 @@ pub fn install_virtual_microphone_message(driver: &str) -> Message {
 }
 
 /// `Misc.host_microphone`: the stream of this side's microphone into the virtual microphone starts or stops.
-pub fn host_microphone_message(active: bool, play_on_speakers: bool) -> Message {
+pub fn host_microphone_message(active: bool) -> Message {
     let mut host = HostMicrophone::new();
     host.active = active;
-    host.play_on_speakers = play_on_speakers;
     let mut misc = Misc::new();
     misc.set_host_microphone(host);
     let mut msg = Message::new();

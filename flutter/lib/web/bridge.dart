@@ -1615,6 +1615,9 @@ class RustdeskImpl {
       required int volume,
       required bool setBoost,
       required double boostDb,
+      required bool setListen,
+      required bool listen,
+      required String listenTarget,
       dynamic hint}) {
     return Future.value();
   }

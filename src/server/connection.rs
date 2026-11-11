@@ -410,11 +410,8 @@ pub struct Connection {
     /// plays into this side's virtual microphone (`Misc.host_microphone`).
     host_microphone: Option<String>,
     /// The controller's microphone stream is on (`Misc.host_microphone`): its audio goes only to the virtual microphone
-    /// (`host_microphone`) and, when requested, to the speakers (`host_microphone_speakers`), never to the voice-call
-    /// playback.
+    /// (`host_microphone`), never to the voice-call playback; without a virtual microphone it is dropped.
     host_microphone_active: bool,
-    host_microphone_play_on_speakers: bool,
-    host_microphone_speakers: Option<MediaSender>,
     // audio by the remote peer/client
     tx_input: std_mpsc::Sender<MessageInput>,
     // handle input messages
@@ -642,8 +639,6 @@ impl Connection {
             audio_sender: None,
             host_microphone: None,
             host_microphone_active: false,
-            host_microphone_play_on_speakers: false,
-            host_microphone_speakers: None,
             voice_call_request_timestamp: None,
             voice_calling: false,
             options_in_login: None,
@@ -843,7 +838,7 @@ impl Connection {
                             } else if &name == "audio" {
                                 conn.audio = enabled;
                                 if !enabled {
-                                    conn.set_host_microphone(false, false);
+                                    conn.set_host_microphone(false);
                                 }
                                 conn.send_permission(Permission::Audio, enabled).await;
                                 if conn.authorized {
@@ -4005,19 +4000,12 @@ impl Connection {
                     },
                     Some(misc::Union::AudioFormat(format)) => {
                         if self.host_microphone_active {
-                            // The controller's microphone plays into the virtual microphone, whatever the mute, and on
-                            // the speakers only when requested.
+                            // The controller's microphone plays into the virtual microphone, whatever the mute.
                             drop(std::mem::replace(&mut self.audio_sender, None));
-                            drop(self.host_microphone_speakers.take());
                             if let Some(key) = self.host_microphone.clone() {
                                 let sender = crate::client::start_audio_thread_for(key);
-                                allow_err!(sender.send(MediaData::AudioFormat(format.clone())));
-                                self.audio_sender = Some(sender);
-                            }
-                            if self.host_microphone_play_on_speakers {
-                                let sender = start_audio_thread();
                                 allow_err!(sender.send(MediaData::AudioFormat(format)));
-                                self.host_microphone_speakers = Some(sender);
+                                self.audio_sender = Some(sender);
                             }
                         } else if !self.disable_audio {
                             // Drop the audio sender previously.
@@ -4140,6 +4128,9 @@ impl Connection {
                                 if c.set_boost {
                                     crate::client::microphone_boost::set(&c.device, c.boost_db);
                                 }
+                                if c.set_listen {
+                                    super::virtual_microphone::set_listen(&c.device, c.listen, &c.listen_target);
+                                }
                                 inner.send(Arc::new(audio_inputs_message(String::new())));
                             });
                         }
@@ -4166,7 +4157,7 @@ impl Connection {
                     }
                     Some(misc::Union::HostMicrophone(h)) => {
                         if self.audio {
-                            self.set_host_microphone(h.active, h.play_on_speakers);
+                            self.set_host_microphone(h.active);
                         }
                     }
                     Some(misc::Union::AudioInputSelection(s)) => {
@@ -4202,9 +4193,6 @@ impl Connection {
                 Some(message::Union::AudioFrame(frame)) => {
                     if self.host_microphone_active {
                         if self.audio {
-                            if let Some(sender) = &self.host_microphone_speakers {
-                                allow_err!(sender.send(MediaData::AudioFrame(Box::new(frame.clone()))));
-                            }
                             if let Some(sender) = &self.audio_sender {
                                 allow_err!(sender.send(MediaData::AudioFrame(Box::new(frame))));
                             }
@@ -5427,17 +5415,15 @@ impl Connection {
     }
 
     /// Starts (`active`) or ends the controller's microphone: the controller's following `AudioFormat` opens playback on
-    /// the virtual microphone's playback endpoint (`virtual_microphone`) when one is installed, and on the speakers when
-    /// `play_on_speakers`; without either the stream is dropped.
-    fn set_host_microphone(&mut self, active: bool, play_on_speakers: bool) {
+    /// the virtual microphone's playback endpoint (`virtual_microphone`) when one is installed; without one the stream
+    /// is dropped. Hearing it on this side's speakers is the virtual microphone's "Listen to this device".
+    fn set_host_microphone(&mut self, active: bool) {
         let id = self.inner.id();
         if self.host_microphone_active {
             drop(self.audio_sender.take());
-            drop(self.host_microphone_speakers.take());
         }
         self.host_microphone = None;
         self.host_microphone_active = active;
-        self.host_microphone_play_on_speakers = active && play_on_speakers;
         if !active {
             return;
         }
@@ -8037,6 +8023,9 @@ fn audio_inputs_message(install: String) -> Message {
     {
         let state = super::virtual_microphone::recording_state();
         inputs.recording_devices = state.devices;
+        inputs.default_recording_listen = state.default_listen;
+        inputs.default_recording_listen_target = state.default_listen_target;
+        inputs.playback_devices = state.playback_devices;
         inputs.inactive_recording_devices = state
             .inactive
             .into_iter()

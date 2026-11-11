@@ -619,15 +619,7 @@ impl<T: InvokeUiSession> Remote<T> {
             s.send(()).ok();
         }
         allow_err!(
-            peer.send(&crate::client::audio_devices::host_microphone_message(
-                !device.is_empty(),
-                crate::client::audio_devices::plays_on_speakers(
-                    &self.handler.lc.read().unwrap().get_option(
-                        crate::client::audio_devices::OPTION_AUDIO_HOST_INPUT_SPEAKERS,
-                    ),
-                    &device,
-                ),
-            ))
+            peer.send(&crate::client::audio_devices::host_microphone_message(!device.is_empty()))
                 .await
         );
         crate::client::audio_volume::set_capture_gain(100);
@@ -2016,6 +2008,7 @@ impl<T: InvokeUiSession> Remote<T> {
                                         false,
                                         volumes.get(device).map_or(-1, |v| *v as i32),
                                         boosts.get(device).copied(),
+                                        None,
                                     ))
                                     .await
                                 );

@@ -295,6 +295,6 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("keyboard-exclude-tip", "Checked: sent to the remote PC. Unchecked: kept on this PC."),
         ("install-vb-cable-tip", "Select this option to install \"VB-CABLE Virtual Audio Device\" (https://vb-audio.com/Cable/)"),
         ("installing-vb-cable-tip", "Installing VB-CABLE on the remote PC..."),
-        ("remote-virtual-microphone-required-tip", "Nothing reaches the remote PC: select its virtual microphone under \"Microphone of the remote PC\", or check \"Play on the remote PC's speakers\"."),
+        ("remote-virtual-microphone-required-tip", "Nothing reaches the remote PC: select its virtual microphone under \"Microphone of the remote PC\"."),
     ].iter().cloned().collect();
 }

@@ -828,6 +828,9 @@ pub fn session_control_remote_recording_device(
     volume: i32,
     set_boost: bool,
     boost_db: f64,
+    set_listen: bool,
+    listen: bool,
+    listen_target: String,
 ) {
     use crate::client::audio_volume as v;
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
@@ -854,6 +857,7 @@ pub fn session_control_remote_recording_device(
                 set_default,
                 volume,
                 set_boost.then_some(boost_db as f32),
+                set_listen.then_some((listen, listen_target)),
             )),
         );
     }

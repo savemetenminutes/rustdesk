@@ -37,9 +37,7 @@ const String kOptionAudioMuteSaved = 'audio-mute-saved';
 /// `audio_devices::OPTION_AUDIO_HOST_INPUT_DEVICE`); "" = none.
 const String kOptionAudioHostInputDevice = 'audio-host-input-device';
 
-/// Peer option `{"<input device of this PC>": true}`: the device's stream also plays on the remote PC's speakers (Rust
-/// `audio_devices::OPTION_AUDIO_HOST_INPUT_SPEAKERS`).
-const String kOptionAudioHostInputSpeakers = 'audio-host-input-speakers';
+
 
 /// What the remote PC reports (`AudioInputs`).
 class _RemoteInputs {
@@ -63,6 +61,12 @@ class _RemoteInputs {
   /// Recording devices that are not active: [name, "disabled" | "unplugged" | "not present"].
   final List<List<String>> inactiveRecordingDevices;
 
+  /// "Listen to this device" of the default recording device, its playback device ("" = Default Playback Device),
+  /// and the playback devices to choose from.
+  final bool defaultRecordingListen;
+  final String defaultRecordingListenTarget;
+  final List<String> playbackDevices;
+
   _RemoteInputs(
       this.devices,
       this.ownSetting,
@@ -73,7 +77,10 @@ class _RemoteInputs {
       this.defaultRecording,
       this.defaultRecordingVolume,
       this.defaultRecordingBoost,
-      this.inactiveRecordingDevices);
+      this.inactiveRecordingDevices,
+      this.defaultRecordingListen,
+      this.defaultRecordingListenTarget,
+      this.playbackDevices);
 }
 
 _RemoteInputs? _parseRemoteInputs(String raw) {
@@ -95,7 +102,10 @@ _RemoteInputs? _parseRemoteInputs(String raw) {
             .cast<String>()
             .map((e) => e.split('\t'))
             .where((p) => p.length == 2)
-            .toList());
+            .toList(),
+        m['default_recording_listen'] == true,
+        (m['default_recording_listen_target'] ?? '') as String,
+        ((m['playback_devices'] ?? []) as List).cast<String>());
   } catch (e) {
     debugPrint('Failed to parse remote audio inputs "$raw": $e');
     return null;
@@ -118,14 +128,7 @@ void audioDevicesDialog(FFI ffi) async {
       sessionId: sessionId, name: kOptionAudioOutputDevice);
   var input = await bind.sessionGetPeerOption(
       sessionId: sessionId, name: kOptionAudioInputDevice);
-  Map<String, dynamic> hostSpeakers = {};
-  try {
-    hostSpeakers = jsonDecode(await bind.sessionGetPeerOption(
-        sessionId: sessionId,
-        name: kOptionAudioHostInputSpeakers)) as Map<String, dynamic>;
-  } catch (e) {
-    hostSpeakers = {};
-  }
+
   var hostInput = await bind.sessionGetPeerOption(
       sessionId: sessionId, name: kOptionAudioHostInputDevice);
   List<String> parseList(String raw) {
@@ -281,14 +284,21 @@ void audioDevicesDialog(FFI ffi) async {
     }
 
     void controlRecording(String device,
-        {bool setDefault = false, int volume = -1, double? boost}) {
+        {bool setDefault = false,
+        int volume = -1,
+        double? boost,
+        bool? listen,
+        String listenTarget = ''}) {
       bind.sessionControlRemoteRecordingDevice(
           sessionId: sessionId,
           device: device,
           setDefault: setDefault,
           volume: volume,
           setBoost: boost != null,
-          boostDb: boost ?? 0);
+          boostDb: boost ?? 0,
+          setListen: listen != null,
+          listen: listen ?? false,
+          listenTarget: listenTarget);
       followRemote(5, (r) => !setDefault || r.defaultRecording == device);
     }
 
@@ -446,6 +456,50 @@ void audioDevicesDialog(FFI ffi) async {
             if (r.defaultRecordingBoost != null)
               boostSlider('remote_boost/$device', r.defaultRecordingBoost!,
                   (x) => controlRecording(device, boost: x)),
+            // The recording device's "Listen" tab (Sound control panel), applied on the remote PC.
+            CheckboxListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.only(left: 48, right: 8),
+              title: Text(_t('Listen to this device')),
+              value: r.defaultRecordingListen,
+              onChanged: (v) {
+                if (v == null) return;
+                controlRecording(device,
+                    listen: v, listenTarget: r.defaultRecordingListenTarget);
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 48, right: 8),
+              child: Row(
+                children: [
+                  SizedBox(
+                      width: 170,
+                      child: Text(_t('Playback through this device'))),
+                  Expanded(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: r.playbackDevices
+                              .contains(r.defaultRecordingListenTarget)
+                          ? r.defaultRecordingListenTarget
+                          : '',
+                      items: [
+                        DropdownMenuItem(
+                            value: '',
+                            child: Text(_t('Default playback device'))),
+                        ...r.playbackDevices.map((p) => DropdownMenuItem(
+                            value: p,
+                            child: Text(p,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis))),
+                      ],
+                      onChanged: (v) => controlRecording(device,
+                          listen: r.defaultRecordingListen,
+                          listenTarget: v ?? ''),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ];
       for (final d in r.recordingDevices) {
         remoteMicGroup.add(radio(
@@ -475,34 +529,12 @@ void audioDevicesDialog(FFI ffi) async {
       }
     }
 
-    // Microphone of this PC: played into the remote PC's virtual microphone (when it is the remote PC's selected
-    // recording device), and on the remote PC's speakers when that is checked for the device.
+    // Microphone of this PC: played into the remote PC's virtual microphone. Hearing it there is the virtual
+    // microphone's "Listen to this device" under "Microphone of the remote PC".
     final virtualSelected =
         virtualMic.isNotEmpty && r?.defaultRecording == virtualMic;
-    bool speakersOf(String device) => hostSpeakers[device] == true;
     List<Widget> hostDeviceControls(String d) => [
-          CheckboxListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.only(left: 48, right: 8),
-            title: Text(_t("Play on the remote PC's speakers")),
-            value: speakersOf(d),
-            onChanged: (v) async {
-              if (v == null) return;
-              final m = Map<String, dynamic>.from(hostSpeakers);
-              if (v) {
-                m[d] = true;
-              } else {
-                m.remove(d);
-              }
-              await bind.sessionPeerOption(
-                  sessionId: sessionId,
-                  name: kOptionAudioHostInputSpeakers,
-                  value: jsonEncode(m));
-              setState(() => hostSpeakers = m);
-              bind.sessionSetHostMicrophone(sessionId: sessionId, device: d);
-            },
-          ),
-          if (!virtualSelected && !speakersOf(d))
+          if (!virtualSelected)
             note(_t('remote-virtual-microphone-required-tip')),
           levelMeter(localLevel <= 0 ? 0 : sqrtLevel(localLevel)),
           volumeSlider('host_input', d),

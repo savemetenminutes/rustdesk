@@ -896,8 +896,6 @@ message Misc {
 
 message HostMicrophone {
   bool active = 1;
-  // Also play the stream on the controlled side's speakers (default output device).
-  bool play_on_speakers = 2;
 }
 
 message AudioInputs {
@@ -924,6 +922,11 @@ message AudioInputs {
   string default_recording_boost = 9;
   // Recording endpoints that are not active, "<name>\t<state>" with state "disabled", "unplugged" or "not present".
   repeated string inactive_recording_devices = 10;
+  // "Listen to this device" of `default_recording` and its playback device ("" = Default Playback Device).
+  bool default_recording_listen = 11;
+  string default_recording_listen_target = 12;
+  // Active playback endpoints.
+  repeated string playback_devices = 13;
 }
 
 message RecordingDeviceControl {
@@ -936,6 +939,10 @@ message RecordingDeviceControl {
   // Set the Microphone Boost to `boost_db`.
   bool set_boost = 4;
   float boost_db = 5;
+  // Set "Listen to this device" to `listen`, played through `listen_target` ("" = Default Playback Device).
+  bool set_listen = 6;
+  bool listen = 7;
+  string listen_target = 8;
 }
 
 message AudioInputSelection {

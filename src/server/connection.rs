@@ -833,6 +833,9 @@ impl Connection {
                                 }
                             } else if &name == "audio" {
                                 conn.audio = enabled;
+                                if !enabled {
+                                    conn.set_host_microphone(false);
+                                }
                                 conn.send_permission(Permission::Audio, enabled).await;
                                 if conn.authorized {
                                     if let Some(s) = conn.server.upgrade() {
@@ -3995,14 +3998,14 @@ impl Connection {
                         if let Some(key) = self.host_microphone.clone() {
                             // The controller's microphone plays into the virtual microphone, whatever the mute.
                             drop(std::mem::replace(&mut self.audio_sender, None));
-                            self.audio_sender = Some(start_audio_thread(key));
+                            self.audio_sender = Some(crate::client::start_audio_thread_for(key));
                             self.audio_sender
                                 .as_ref()
                                 .map(|a| allow_err!(a.send(MediaData::AudioFormat(format))));
                         } else if !self.disable_audio {
                             // Drop the audio sender previously.
                             drop(std::mem::replace(&mut self.audio_sender, None));
-                            self.audio_sender = Some(start_audio_thread(String::new()));
+                            self.audio_sender = Some(start_audio_thread());
                             self.audio_sender
                                 .as_ref()
                                 .map(|a| allow_err!(a.send(MediaData::AudioFormat(format))));
@@ -4079,29 +4082,38 @@ impl Connection {
                     }
                     // Gated on the audio permission (`self.audio`), not on the controller's mute
                     // (`disable_audio`): a muted controller still chooses the capture device.
+                    // Device queries block on the audio device thread: they run on their own thread and answer
+                    // through the connection's channel.
                     Some(misc::Union::RequestAudioInputs(_)) => {
                         if self.audio {
-                            self.send(audio_inputs_message(String::new())).await;
+                            let mut inner = self.inner.clone();
+                            std::thread::spawn(move || {
+                                inner.send(Arc::new(audio_inputs_message(String::new())));
+                            });
                         }
                     }
+                    #[cfg(windows)]
                     Some(misc::Union::RequestRecordingLevel(_)) => {
                         if self.audio {
-                            #[cfg(windows)]
-                            {
+                            let mut inner = self.inner.clone();
+                            std::thread::spawn(move || {
                                 let name = super::virtual_microphone::default_recording_name();
                                 let level = if name.is_empty() { 0.0 } else { crate::audio_level::level(&name) };
                                 let mut misc = Misc::new();
                                 misc.set_recording_level(level);
                                 let mut msg_out = Message::new();
                                 msg_out.set_misc(misc);
-                                self.send(msg_out).await;
-                            }
+                                inner.send(Arc::new(msg_out));
+                            });
                         }
                     }
+                    // Changing the recording devices or installing a driver changes the PC: it needs control
+                    // (keyboard) permission besides audio.
+                    #[cfg(windows)]
                     Some(misc::Union::RecordingDeviceControl(c)) => {
-                        if self.audio {
-                            #[cfg(windows)]
-                            {
+                        if self.audio && self.keyboard {
+                            let mut inner = self.inner.clone();
+                            std::thread::spawn(move || {
                                 if c.set_default {
                                     super::virtual_microphone::set_default_recording(&c.device);
                                 }
@@ -4111,15 +4123,13 @@ impl Connection {
                                 if c.set_boost {
                                     crate::client::microphone_boost::set(&c.device, c.boost_db);
                                 }
-                            }
-                            #[cfg(not(windows))]
-                            let _ = c;
-                            self.send(audio_inputs_message(String::new())).await;
+                                inner.send(Arc::new(audio_inputs_message(String::new())));
+                            });
                         }
                     }
                     #[cfg(windows)]
                     Some(misc::Union::InstallVirtualMicrophone(driver)) => {
-                        if self.audio {
+                        if self.audio && self.keyboard {
                             let mut inner = self.inner.clone();
                             let send_inputs = move |inner: &mut ConnInner, status: String| {
                                 inner.send(Arc::new(audio_inputs_message(status)));
@@ -4173,7 +4183,7 @@ impl Connection {
                     _ => {}
                 },
                 Some(message::Union::AudioFrame(frame)) => {
-                    if !self.disable_audio || self.host_microphone.is_some() {
+                    if !self.disable_audio || (self.audio && self.host_microphone.is_some()) {
                         if let Some(sender) = &self.audio_sender {
                             allow_err!(sender.send(MediaData::AudioFrame(Box::new(frame))));
                         } else {

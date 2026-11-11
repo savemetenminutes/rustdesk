@@ -425,7 +425,7 @@ void audioDevicesDialog(FFI ffi) async {
           ];
       for (final d in r.recordingDevices) {
         remoteMicGroup.add(radio(
-            d == virtualMic ? '$d (virtual microphone, fed from this PC)' : d,
+            d == virtualMic ? _t('{} (virtual microphone, fed from this PC)', d) : d,
             d,
             r.defaultRecording,
             (v) => controlRecording(v, setDefault: true),
@@ -560,7 +560,7 @@ void audioDevicesDialog(FFI ffi) async {
     ];
     final rightNames = [
       ...?r?.recordingDevices.map((d) =>
-          d == virtualMic ? '$d (virtual microphone, fed from this PC)' : d),
+          d == virtualMic ? _t('{} (virtual microphone, fed from this PC)', d) : d),
       ...?r?.inactiveRecordingDevices.map((d) => '${d[0]} (${d[1]})'),
       ...hostInputs,
     ];

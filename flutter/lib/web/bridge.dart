@@ -1585,6 +1585,78 @@ class RustdeskImpl {
   String mainNormalizeKeyboardShortcut({required String chord, dynamic hint}) =>
       '';
 
+  String mainGetAudioOutputDevices({dynamic hint}) => '[]';
+
+  Future<void> sessionSetAudioOutputDevice(
+      {required UuidValue sessionId, required String device, dynamic hint}) {
+    return Future.value();
+  }
+
+  String mainGetAudioInputDevices({dynamic hint}) => '[]';
+
+  Future<void> sessionSetHostMicrophone(
+      {required UuidValue sessionId, required String device, dynamic hint}) {
+    return Future.value();
+  }
+
+  Future<void> sessionRequestRemoteAudioInputs(
+      {required UuidValue sessionId, dynamic hint}) {
+    return Future.value();
+  }
+
+  String sessionGetRemoteAudioInputs(
+          {required UuidValue sessionId, dynamic hint}) =>
+      '';
+
+  Future<void> sessionControlRemoteRecordingDevice(
+      {required UuidValue sessionId,
+      required String device,
+      required bool setDefault,
+      required int volume,
+      required bool setBoost,
+      required double boostDb,
+      dynamic hint}) {
+    return Future.value();
+  }
+
+  double mainGetInputLevel({required String device, dynamic hint}) => 0;
+
+  double sessionGetRemoteRecordingLevel(
+          {required UuidValue sessionId, dynamic hint}) =>
+      0;
+
+  Future<void> sessionInstallRemoteVirtualMicrophone(
+      {required UuidValue sessionId, required String driver, dynamic hint}) {
+    return Future.value();
+  }
+
+  String sessionGetAudioVolumes({required UuidValue sessionId, dynamic hint}) =>
+      '';
+
+  Future<void> sessionSetAudioVolume(
+      {required UuidValue sessionId,
+      required String kind,
+      required String device,
+      required int percent,
+      dynamic hint}) {
+    return Future.value();
+  }
+
+  String mainGetMicrophoneBoost({required String device, dynamic hint}) => '';
+
+  Future<void> sessionSetMicrophoneBoost(
+      {required UuidValue sessionId,
+      required String device,
+      required double db,
+      dynamic hint}) {
+    return Future.value();
+  }
+
+  Future<void> sessionSetRemoteAudioInput(
+      {required UuidValue sessionId, required String value, dynamic hint}) {
+    return Future.value();
+  }
+
   void mainInitInputSource({dynamic hint}) {
     throw UnimplementedError("mainIsInstalled");
   }

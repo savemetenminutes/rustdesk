@@ -17,7 +17,7 @@ use windows::{
     Win32::{
         Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
         Media::Audio::{
-            eCapture, eCommunications, eConsole, eMultimedia, eRender, EDataFlow,
+            eCapture, eCommunications, eConsole, eMultimedia, eRender, EDataFlow, ERole,
             Endpoints::IAudioEndpointVolume, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
             DEVICE_STATEMASK_ALL, DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT,
             DEVICE_STATE_UNPLUGGED,
@@ -197,7 +197,7 @@ pub fn recording_state() -> RecordingState {
         state.default_boost = crate::client::microphone_boost::get(&state.default)
             .map(|b| (b.min, b.max, b.step, b.current));
     }
-    log::info!(
+    log::trace!(
         "Recording devices: {:?}, default {:?} ({}%), virtual microphone {:?}",
         state.devices,
         state.default,
@@ -213,6 +213,14 @@ unsafe fn find_recording(name: &str) -> windows::core::Result<Option<Endpoint>> 
 
 /// Makes endpoint `id` the Windows default of its flow for every role (`IPolicyConfig::SetDefaultEndpoint`).
 unsafe fn set_default_endpoint(id: &str) -> windows::core::Result<()> {
+    for role in [eConsole, eMultimedia, eCommunications] {
+        set_default_endpoint_role(id, role)?;
+    }
+    Ok(())
+}
+
+/// Makes endpoint `id` the Windows default of its flow for `role`.
+unsafe fn set_default_endpoint_role(id: &str, role: ERole) -> windows::core::Result<()> {
     let unknown: IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)?;
     let mut raw: *mut c_void = std::ptr::null_mut();
     unknown.query(&IID_IPOLICY_CONFIG, &mut raw).ok()?;
@@ -221,15 +229,12 @@ unsafe fn set_default_endpoint(id: &str) -> windows::core::Result<()> {
     let vtable = *(policy.as_raw() as *const *const usize);
     let set: SetDefaultEndpoint = std::mem::transmute(*vtable.add(SET_DEFAULT_ENDPOINT_SLOT));
     let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
-    for role in [eConsole, eMultimedia, eCommunications] {
-        set(policy.as_raw(), PCWSTR(wide.as_ptr()), role.0).ok()?;
-    }
-    Ok(())
+    set(policy.as_raw(), PCWSTR(wide.as_ptr()), role.0).ok()
 }
 
-/// Endpoint id of the Windows default (`eConsole`) of `flow`.
-unsafe fn default_endpoint_id(flow: EDataFlow) -> Option<String> {
-    let device = enumerator().ok()?.GetDefaultAudioEndpoint(flow, eConsole).ok()?;
+/// Endpoint id of the Windows default of `flow` for `role`.
+unsafe fn default_endpoint_id(flow: EDataFlow, role: ERole) -> Option<String> {
+    let device = enumerator().ok()?.GetDefaultAudioEndpoint(flow, role).ok()?;
     device_id(&device).ok()
 }
 
@@ -287,7 +292,7 @@ pub fn set_recording_volume(name: &str, percent: u32) {
 pub const VB_CABLE_PACK_URL: &str = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
 
 /// Installs virtual microphone driver `driver` ("vb-cable"): downloads the driver pack into the temp directory,
-/// extracts it with `Expand-Archive` and runs `VBCABLE_Setup_x64.exe -i -h`. Windows asks the user of this side to
+/// extracts it with `tar` and runs `VBCABLE_Setup_x64.exe -i -h`. Windows asks the user of this side to
 /// allow the signed driver. Blocking; returns once the installer exits.
 pub fn install(driver: &str) -> hbb_common::ResultType<()> {
     use hbb_common::anyhow::{anyhow, bail};
@@ -305,25 +310,27 @@ pub fn install(driver: &str) -> hbb_common::ResultType<()> {
         .error_for_status()?
         .bytes()?;
     std::fs::write(&zip, &bytes)?;
-    let status = std::process::Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &format!(
-                "Expand-Archive -Force -LiteralPath '{}' -DestinationPath '{}'",
-                zip.display(),
-                dir.display()
-            ),
-        ])
+    let status = std::process::Command::new("tar")
+        .arg("-xf")
+        .arg(&zip)
+        .arg("-C")
+        .arg(&dir)
         .status()?;
     if !status.success() {
-        bail!("Expand-Archive exited with {status}");
+        bail!("tar exited with {status}");
     }
     // The VB-CABLE setup makes its endpoints the default playback and recording devices; the previous defaults are put
     // back afterwards (the recording default is chosen in the controller's Audio dialog).
-    let previous = crate::audio_device_thread::run(|| unsafe {
-        (default_endpoint_id(eRender), default_endpoint_id(eCapture))
+    let previous: Vec<(String, ERole)> = crate::audio_device_thread::run(|| unsafe {
+        let mut out = vec![];
+        for flow in [eRender, eCapture] {
+            for role in [eConsole, eMultimedia, eCommunications] {
+                if let Some(id) = default_endpoint_id(flow, role) {
+                    out.push((id, role));
+                }
+            }
+        }
+        out
     })
     .unwrap_or_default();
     let setup = dir.join("VBCABLE_Setup_x64.exe");
@@ -331,10 +338,9 @@ pub fn install(driver: &str) -> hbb_common::ResultType<()> {
     let status = std::process::Command::new(&setup).args(["-i", "-h"]).status()?;
     log::info!("VB-CABLE setup exited with {status}");
     crate::audio_device_thread::run(move || unsafe {
-        for id in [previous.0, previous.1].into_iter().flatten() {
-            match set_default_endpoint(&id) {
-                Ok(()) => log::info!("Default endpoint {id} restored after the VB-CABLE setup"),
-                Err(e) => log::error!("Failed to restore default endpoint {id}: {e}"),
+        for (id, role) in previous {
+            if let Err(e) = set_default_endpoint_role(&id, role) {
+                log::error!("Failed to restore default endpoint {id} for role {}: {e}", role.0);
             }
         }
     });

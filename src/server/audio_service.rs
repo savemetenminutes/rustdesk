@@ -64,13 +64,18 @@ pub fn get_capture_devices() -> Vec<String> {
                     let name = device.name().unwrap_or_default();
                     match device.default_input_config() {
                         Ok(_) => out.push(name),
-                        Err(e) => log::debug!("Capture device list: \"{name}\" has no input configuration: {e}"),
+                        Err(e) => log::trace!("Capture device list: \"{name}\" has no input configuration: {e}"),
                     }
                 }
             }
-            Err(e) => log::warn!("Capture device list: device enumeration failed: {e}"),
+            Err(e) => hbb_common::throttled_log!(
+                std::time::Duration::from_secs(60),
+                warn,
+                "Capture device list: device enumeration failed: {}",
+                e
+            ),
         }
-        log::info!("Capture device list: {out:?}");
+        log::trace!("Capture device list: {out:?}");
         out
     })
     .unwrap_or_default()

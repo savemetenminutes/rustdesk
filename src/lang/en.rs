@@ -293,5 +293,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("android-logs-folder-tip", "Choose Android → media to store log files."),
         ("install-directory-not-empty-tip", "The selected folder is not empty. Installation may delete existing data. Consider choosing a different folder."),
         ("keyboard-exclude-tip", "Checked: sent to the remote PC. Unchecked: kept on this PC."),
+        ("install-vb-cable-tip", "Select this option to install \"VB-CABLE Virtual Audio Device\" (https://vb-audio.com/Cable/)"),
+        ("installing-vb-cable-tip", "Installing VB-CABLE on the remote PC: allow the Windows driver prompt on its screen"),
+        ("remote-virtual-microphone-required-tip", "The remote PC must have the virtual microphone installed and selected under \"Microphone of the remote PC\" to send a microphone of this PC"),
     ].iter().cloned().collect();
 }

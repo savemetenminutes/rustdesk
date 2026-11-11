@@ -3002,22 +3002,13 @@ impl LoginConfigHandler {
 
         self.id = id;
         self.conn_type = conn_type;
-        let mut config = self.load_config();
+        let config = self.load_config();
         self.remember = !config.password.is_empty();
-        // A session starts muted unless the peer option `audio_devices::OPTION_AUDIO_MUTE_SAVED` holds "N". The mute
-        // toggle changes `disable_audio` for the running session only; the Audio dialog's Save/Clear write the option.
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        if conn_type == ConnType::DEFAULT_CONN {
-            let muted = config
-                .options
-                .get(audio_devices::OPTION_AUDIO_MUTE_SAVED)
-                .map_or(true, |v| v != "N");
-            if config.disable_audio.v != muted {
-                config.disable_audio.v = muted;
-                config.store(&self.id);
-            }
-        }
         self.config = config;
+        #[cfg(target_os = "windows")]
+        if conn_type == ConnType::DEFAULT_CONN {
+            audio_devices::apply_mute_at_start(&mut self.config, &self.id);
+        }
 
         let conn_token = conn_token
             .map(|x| serde_json::from_str::<ConnToken>(&x).ok())
@@ -4195,7 +4186,38 @@ pub fn start_video_thread<F, T>(
 
 /// Start an audio thread
 /// Return a audio [`MediaSender`]
-pub fn start_audio_thread(peer_id: String) -> MediaSender {
+pub fn start_audio_thread() -> MediaSender {
+    let (audio_sender, audio_receiver) = mpsc::channel::<MediaData>();
+    std::thread::spawn(move || {
+        let mut audio_handler = AudioHandler::default();
+        loop {
+            #[cfg(target_os = "windows")]
+            let received = audio_handler.receive_audio(&audio_receiver);
+            #[cfg(not(target_os = "windows"))]
+            let received = audio_receiver.recv();
+            if let Ok(data) = received {
+                match data {
+                    MediaData::AudioFrame(af) => {
+                        audio_handler.handle_frame(*af);
+                    }
+                    MediaData::AudioFormat(f) => {
+                        log::debug!("recved audio format, sample rate={}", f.sample_rate);
+                        audio_handler.handle_format(f);
+                    }
+                    _ => {}
+                }
+            } else {
+                break;
+            }
+        }
+        log::info!("Audio decoder loop exits");
+    });
+    audio_sender
+}
+
+/// `start_audio_thread()` whose playback uses the output device and volumes stored for `peer_id`
+/// (`audio_devices`, `audio_volume`).
+pub fn start_audio_thread_for(peer_id: String) -> MediaSender {
     let (audio_sender, audio_receiver) = mpsc::channel::<MediaData>();
     std::thread::spawn(move || {
         audio_devices::set_thread_peer_id(&peer_id);

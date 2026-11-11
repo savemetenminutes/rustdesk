@@ -110,6 +110,7 @@ pub fn remote_inputs_json(peer_id: &str) -> String {
             "virtual_microphone": inputs.virtual_microphone,
             "virtual_microphone_install": inputs.virtual_microphone_install,
             "recording_devices": inputs.recording_devices,
+            "inactive_recording_devices": inputs.inactive_recording_devices,
             "default_recording": inputs.default_recording,
             "default_recording_volume": inputs.default_recording_volume,
             "default_recording_boost": inputs.default_recording_boost,

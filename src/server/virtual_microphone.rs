@@ -19,7 +19,8 @@ use windows::{
         Media::Audio::{
             eCapture, eCommunications, eConsole, eMultimedia, eRender, EDataFlow,
             Endpoints::IAudioEndpointVolume, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
-            DEVICE_STATE_ACTIVE,
+            DEVICE_STATEMASK_ALL, DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT,
+            DEVICE_STATE_UNPLUGGED,
         },
         System::Com::{
             CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
@@ -60,6 +61,8 @@ pub struct RecordingState {
     /// Microphone Boost of `default`: `(min, max, step, current)` dB.
     pub default_boost: Option<(f32, f32, f32, f32)>,
     pub virtual_microphone: Option<Pair>,
+    /// Recording endpoints that are not active: `(name, "disabled" | "unplugged" | "not present")`, one per name.
+    pub inactive: Vec<(String, String)>,
 }
 
 struct Endpoint {
@@ -132,6 +135,33 @@ pub fn detect() -> Option<Pair> {
     .flatten()
 }
 
+unsafe fn inactive_recording() -> windows::core::Result<Vec<(String, String)>> {
+    let collection = enumerator()?.EnumAudioEndpoints(eCapture, windows::Win32::Media::Audio::DEVICE_STATE(DEVICE_STATEMASK_ALL))?;
+    let mut out: Vec<(String, String)> = Vec::new();
+    for i in 0..collection.GetCount()? {
+        let device = collection.Item(i)?;
+        let state = device.GetState()?;
+        let label = if state.0 & DEVICE_STATE_ACTIVE.0 != 0 {
+            continue;
+        } else if state.0 & DEVICE_STATE_DISABLED.0 != 0 {
+            "disabled"
+        } else if state.0 & DEVICE_STATE_UNPLUGGED.0 != 0 {
+            "unplugged"
+        } else if state.0 & DEVICE_STATE_NOTPRESENT.0 != 0 {
+            "not present"
+        } else {
+            continue;
+        };
+        let Ok(name) = friendly_name(&device) else {
+            continue;
+        };
+        if !out.iter().any(|(n, _)| *n == name) {
+            out.push((name, label.to_owned()));
+        }
+    }
+    Ok(out)
+}
+
 unsafe fn recording_state_inner() -> windows::core::Result<RecordingState> {
     let recording = endpoints(eCapture)?;
     let playback = endpoints(eRender)?;
@@ -139,6 +169,7 @@ unsafe fn recording_state_inner() -> windows::core::Result<RecordingState> {
         devices: recording.iter().map(|e| e.name.clone()).collect(),
         default_volume: -1,
         virtual_microphone: pair(&playback, &recording),
+        inactive: inactive_recording().unwrap_or_default(),
         ..Default::default()
     };
     if let Ok(default) = enumerator()?.GetDefaultAudioEndpoint(eCapture, eConsole) {

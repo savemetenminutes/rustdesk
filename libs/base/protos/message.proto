@@ -920,6 +920,8 @@ message AudioInputs {
   int32 default_recording_volume = 8;
   // Microphone Boost of `default_recording`: `{"min","max","step","current"}` dB, or "" when it has none.
   string default_recording_boost = 9;
+  // Recording endpoints that are not active, "<name>\t<state>" with state "disabled", "unplugged" or "not present".
+  repeated string inactive_recording_devices = 10;
 }
 
 message RecordingDeviceControl {

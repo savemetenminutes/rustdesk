@@ -7997,6 +7997,11 @@ fn audio_inputs_message(install: String) -> Message {
     {
         let state = super::virtual_microphone::recording_state();
         inputs.recording_devices = state.devices;
+        inputs.inactive_recording_devices = state
+            .inactive
+            .into_iter()
+            .map(|(name, state)| format!("{name}\t{state}"))
+            .collect();
         inputs.default_recording = state.default;
         inputs.default_recording_volume = state.default_volume;
         inputs.default_recording_boost = state

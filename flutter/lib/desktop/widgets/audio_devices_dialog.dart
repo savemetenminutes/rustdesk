@@ -56,6 +56,9 @@ class _RemoteInputs {
   final int defaultRecordingVolume;
   final Map<String, dynamic>? defaultRecordingBoost;
 
+  /// Recording devices that are not active: [name, "disabled" | "unplugged" | "not present"].
+  final List<List<String>> inactiveRecordingDevices;
+
   _RemoteInputs(
       this.devices,
       this.ownSetting,
@@ -65,7 +68,8 @@ class _RemoteInputs {
       this.recordingDevices,
       this.defaultRecording,
       this.defaultRecordingVolume,
-      this.defaultRecordingBoost);
+      this.defaultRecordingBoost,
+      this.inactiveRecordingDevices);
 }
 
 _RemoteInputs? _parseRemoteInputs(String raw) {
@@ -82,7 +86,12 @@ _RemoteInputs? _parseRemoteInputs(String raw) {
         ((m['recording_devices'] ?? []) as List).cast<String>(),
         (m['default_recording'] ?? '') as String,
         ((m['default_recording_volume'] ?? -1) as num).toInt(),
-        boost.isEmpty ? null : jsonDecode(boost) as Map<String, dynamic>);
+        boost.isEmpty ? null : jsonDecode(boost) as Map<String, dynamic>,
+        ((m['inactive_recording_devices'] ?? []) as List)
+            .cast<String>()
+            .map((e) => e.split('\t'))
+            .where((p) => p.length == 2)
+            .toList());
   } catch (e) {
     debugPrint('Failed to parse remote audio inputs "$raw": $e');
     return null;
@@ -422,6 +431,10 @@ void audioDevicesDialog(FFI ffi) async {
             (v) => controlRecording(v, setDefault: true),
             whenSelected: recordingControls(d)));
       }
+      for (final d in r.inactiveRecordingDevices) {
+        remoteMicGroup.add(radio('${d[0]} (${d[1]})', 'inactive:${d[0]}',
+            r.defaultRecording, null));
+      }
       if (virtualMic.isEmpty && r.install != 'installing') {
         remoteMicGroup.add(radio(
             'Select this option to install "VB-CABLE Virtual Audio Device" (https://vb-audio.com/Cable/)',
@@ -548,6 +561,7 @@ void audioDevicesDialog(FFI ffi) async {
     final rightNames = [
       ...?r?.recordingDevices.map((d) =>
           d == virtualMic ? '$d (virtual microphone, fed from this PC)' : d),
+      ...?r?.inactiveRecordingDevices.map((d) => '${d[0]} (${d[1]})'),
       ...hostInputs,
     ];
     final leftWidth = [widest(leftNames, radioExtra), sliderRow].reduce((a, b) => a > b ? a : b);

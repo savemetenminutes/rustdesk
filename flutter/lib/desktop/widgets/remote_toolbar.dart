@@ -2045,15 +2045,33 @@ class _DisplayMenuState extends State<_DisplayMenu> {
                   ffi.connType == ConnType.defaultConn &&
                   e.actionId == kShortcutActionToggleMute))
               .toList();
-          if (v.isEmpty) return Offstage();
-          return Column(
-              children: v
-                  .map((e) => CkbMenuButton(
-                      value: e.value,
-                      onChanged: e.onChanged,
-                      child: e.child,
+          // "Sync clipboard between sessions" (local option `allow-sync-clipboard-between-sessions`, also in
+          // Settings → General): a clipboard received from one session is forwarded to the other sessions.
+          final syncClipboard = ffi.connType == ConnType.defaultConn
+              ? StatefulBuilder(
+                  builder: (context, setState) => CkbMenuButton(
+                      value: bind.mainGetLocalOption(
+                              key: kOptionAllowSyncClipboardBetweenSessions) ==
+                          'Y',
+                      onChanged: (value) async {
+                        if (value == null) return;
+                        await bind.mainSetLocalOption(
+                            key: kOptionAllowSyncClipboardBetweenSessions,
+                            value: value ? 'Y' : 'N');
+                        setState(() {});
+                      },
+                      child: Text(translate('Sync clipboard between sessions')),
                       ffi: ffi))
-                  .toList());
+              : null;
+          if (v.isEmpty && syncClipboard == null) return Offstage();
+          return Column(children: [
+            ...v.map((e) => CkbMenuButton(
+                value: e.value,
+                onChanged: e.onChanged,
+                child: e.child,
+                ffi: ffi)),
+            if (syncClipboard != null) syncClipboard,
+          ]);
         });
   }
 }

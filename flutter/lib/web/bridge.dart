@@ -1572,6 +1572,8 @@ class RustdeskImpl {
     throw UnimplementedError("mainIsInstalled");
   }
 
+  void mainDisplayWindowsLog({required String message, dynamic hint}) {}
+
   void mainInitInputSource({dynamic hint}) {
     throw UnimplementedError("mainIsInstalled");
   }

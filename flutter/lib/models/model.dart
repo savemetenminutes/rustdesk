@@ -1523,10 +1523,13 @@ class FfiModel with ChangeNotifier {
   /// info, because a reconnect re-lays out the canvas and resets them to 0.
   Future<void> _initWindowView(String peerId) async {
     if (_windowViewInitialized) {
-      final stored = loadDisplayWindows(peerId)[_pi.currentDisplay];
+      // A reconnect first resets the window to the peer's primary display and switches back to the one it showed
+      // (`pendingMonitorRestore`) later; the offsets of that display apply.
+      final display = pendingMonitorRestore ?? _pi.currentDisplay;
+      final stored = loadDisplayWindows(peerId)[display];
       if (stored?.scrollX != null || stored?.scrollY != null) {
         displayWindowsLog('reconnect scroll restore session=$sessionId peer=$peerId '
-            'display=${_pi.currentDisplay} x=${stored!.scrollX} y=${stored.scrollY}');
+            'display=$display x=${stored!.scrollX} y=${stored.scrollY}');
         parent.target?.canvasModel
             .restoreScrollOffset(stored.scrollX, stored.scrollY);
       }
@@ -2460,8 +2463,8 @@ class CanvasModel with ChangeNotifier {
     _scrollRestoreTimer = Timer.periodic(const Duration(milliseconds: 200), (t) {
       tries++;
       if (!_horizontal.hasClients && !_vertical.hasClients) {
-        if (attachedAt == null && tries >= 50) {
-          displayWindowsLog('scroll restore x=$x y=$y: no scrollbar attached in 10 s');
+        if (tries >= 50) {
+          displayWindowsLog('scroll restore x=$x y=$y: no scrollbar attached');
           endScrollRestore();
         }
         return;
@@ -2961,6 +2964,7 @@ class CanvasModel with ChangeNotifier {
   }
 
   clear() {
+    endScrollRestore();
     _x = 0;
     _y = 0;
     _scale = 1.0;

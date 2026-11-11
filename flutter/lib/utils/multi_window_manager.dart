@@ -233,7 +233,7 @@ class RustDeskMultiWindowManager {
             // `kWindowEventNewRemoteDesktop` would add a tab with the same peer id key, which
             // `DesktopTabController.add()` drops.
             _inactiveWindows.remove(windowId);
-            displayWindowsLog('newSession reuse hidden window $windowId msg=$msg');
+            displayWindowsLog('newSession reuse hidden window $windowId');
             if (screenRect == null) {
               final params = jsonDecode(msg);
               await restoreWindowPosition(type,
@@ -254,7 +254,7 @@ class RustDeskMultiWindowManager {
       }
       final windowId = await newSessionWindow(
           type, remoteId, msg, windows, screenRect != null);
-      displayWindowsLog('newSession new window $windowId msg=$msg');
+      displayWindowsLog('newSession new window $windowId');
       return MultiWindowCallResult(windowId, null);
     }
   }

@@ -354,7 +354,12 @@ impl<T: InvokeUiSession> Remote<T> {
                             // receiver (`clipboard::get_rx_cliprdr_client()`) that the newer round waits for.
                             if self.handler.connection_round_state.lock().unwrap().is_round_gt(round) {
                                 log::info!("Connection round {round} is superseded, closing it");
-                                self.send_close_reason(&mut peer, "").await;
+                                // The newer round uses the same per-peer cliprdr channel; it must stay registered.
+                                #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
+                                if let Some(cleanup) = rx_clip_client_holder.1.as_mut() {
+                                    cleanup.b = false;
+                                }
+                                let _ = time::timeout(Duration::from_secs(1), self.send_close_reason(&mut peer, "")).await;
                                 break;
                             }
                             if self.handler.is_restarting_remote_device()

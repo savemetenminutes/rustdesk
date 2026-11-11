@@ -2592,9 +2592,10 @@ class _KeyboardMenu extends StatelessWidget {
               Divider(),
               ...toolbarToggles(),
               ...mouseSpeed(),
-              if (isWindows && !ffi.ffiModel.viewOnly)
+              // The exclude list is applied in the keyboard grab hook, which input source 2 does not use.
+              if (isWindows && !ffi.ffiModel.viewOnly && !isInputSourceFlutter)
                 MenuButton(
-                  child: Text('Shortcuts sent to the remote PC')
+                  child: Text(translate('Shortcuts sent to the remote PC'))
                       .paddingOnly(left: 26.0),
                   onPressed: () => keyboardExcludeShortcutsDialog(ffi),
                   ffi: ffi,

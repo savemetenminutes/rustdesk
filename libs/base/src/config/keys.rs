@@ -14,6 +14,7 @@ pub const OPTION_SHOW_QUALITY_MONITOR: &str = "show_quality_monitor";
 pub const OPTION_DISABLE_AUDIO: &str = "disable_audio";
 pub const OPTION_ENABLE_REMOTE_PRINTER: &str = "enable-remote-printer";
 pub const OPTION_DISABLE_CLIPBOARD: &str = "disable_clipboard";
+pub const OPTION_KEYBOARD_EXCLUDE_SHORTCUTS: &str = "keyboard-exclude-shortcuts";
 pub const OPTION_LOCK_AFTER_SESSION_END: &str = "lock_after_session_end";
 pub const OPTION_PRIVACY_MODE: &str = "privacy_mode";
 pub const OPTION_TOUCH_MODE: &str = "touch-mode";

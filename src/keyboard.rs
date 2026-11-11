@@ -358,12 +358,12 @@ pub mod client {
 
         let keyboard_mode = get_keyboard_mode_enum(keyboard_mode);
         if is_long_press(&event) {
-            log::debug!("[kbd] {:?}: long press of a held modifier, not sent", event.event_type);
+            hbb_common::log::trace!("[kbd] {:?}: long press of a held modifier, not sent", event.event_type);
             return;
         }
         let peer = get_peer_platform().to_lowercase();
         let key_events = event_to_key_events(peer, &event, keyboard_mode, lock_modes);
-        log::debug!(
+        hbb_common::log::trace!(
             "[kbd] {:?}: {} key event(s) sent",
             event.event_type,
             key_events.len()
@@ -698,7 +698,7 @@ fn start_grab_loop() {
             })) {
                 Ok(r) => r,
                 Err(_) => {
-                    log::error!("[kbd] exclude hook panicked on {:?}", key);
+                    hbb_common::log::error!("[kbd] exclude hook panicked on {:?}", key);
                     None
                 }
             };
@@ -706,7 +706,7 @@ fn start_grab_loop() {
             let excluded: Option<Option<Event>> = None;
 
             if KEYBOARD_HOOKED.load(Ordering::SeqCst) || excluded.is_some() {
-                log::debug!(
+                hbb_common::log::trace!(
                     "[kbd] {:?} press={} pos=0x{:x} hooked={} exclude={}",
                     key,
                     is_press,
@@ -1098,7 +1098,7 @@ pub fn send_key_event(key_event: &KeyEvent) {
     if let Some(session) = flutter::get_cur_session() {
         session.send_key_event(key_event);
     } else {
-        log::debug!("[kbd] no current session: key event dropped");
+        hbb_common::log::trace!("[kbd] no current session: key event dropped");
     }
 }
 

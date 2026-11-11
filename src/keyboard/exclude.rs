@@ -1,6 +1,6 @@
 //! Per-peer keyboard shortcut exclude list.
 //!
-//! Peer option `KEYBOARD_EXCLUDE_SHORTCUTS_OPTION` holds a comma-separated list of chords (`Ctrl+Shift`, `Win+D`,
+//! Peer option `OPTION_KEYBOARD_EXCLUDE_SHORTCUTS` holds a comma-separated list of chords (`Ctrl+Shift`, `Win+D`,
 //! `Alt+Tab`, ...). While a session window grabs the keyboard, every key press goes to the remote PC; a chord on the
 //! focused session's list goes to the local PC instead:
 //!
@@ -13,6 +13,7 @@
 //!   chord (input language switch, Start menu) does not fire.
 
 use super::client;
+use base::config::keys::OPTION_KEYBOARD_EXCLUDE_SHORTCUTS;
 use rdev::{Event, EventType, Key};
 use std::{
     collections::{HashMap, VecDeque},
@@ -22,8 +23,6 @@ use std::{
     },
     time::SystemTime,
 };
-
-pub const KEYBOARD_EXCLUDE_SHORTCUTS_OPTION: &str = "keyboard-exclude-shortcuts";
 
 const MOD_CTRL: u8 = 1;
 const MOD_ALT: u8 = 2;
@@ -75,10 +74,10 @@ const KEY_NAMES: &[(&str, Key)] = &[
     ("Apps", Key::Apps), ("Menu", Key::Apps),
     ("`", Key::BackQuote), ("-", Key::Minus), ("=", Key::Equal),
     ("[", Key::LeftBracket), ("]", Key::RightBracket), ("\\", Key::BackSlash),
-    (";", Key::SemiColon), ("'", Key::Quote), (",", Key::Comma), (".", Key::Dot), ("/", Key::Slash),
+    (";", Key::SemiColon), ("'", Key::Quote), ("Comma", Key::Comma), (".", Key::Dot), ("/", Key::Slash),
     ("Num0", Key::Kp0), ("Num1", Key::Kp1), ("Num2", Key::Kp2), ("Num3", Key::Kp3), ("Num4", Key::Kp4),
     ("Num5", Key::Kp5), ("Num6", Key::Kp6), ("Num7", Key::Kp7), ("Num8", Key::Kp8), ("Num9", Key::Kp9),
-    ("Num+", Key::KpPlus), ("Num-", Key::KpMinus), ("Num*", Key::KpMultiply), ("Num/", Key::KpDivide),
+    ("NumPlus", Key::KpPlus), ("Num-", Key::KpMinus), ("Num*", Key::KpMultiply), ("Num/", Key::KpDivide),
     ("NumEnter", Key::KpReturn), ("NumDel", Key::KpDecimal),
     ("VolumeUp", Key::VolumeUp), ("VolumeDown", Key::VolumeDown), ("VolumeMute", Key::VolumeMute),
 ];
@@ -204,7 +203,7 @@ pub fn set_exclude_list(session: &crate::flutter::FlutterSession, value: &str) -
     let list = parse_list(value);
     let canonical = list_to_string(&list);
     session.set_option(
-        KEYBOARD_EXCLUDE_SHORTCUTS_OPTION.to_owned(),
+        OPTION_KEYBOARD_EXCLUDE_SHORTCUTS.to_owned(),
         canonical.clone(),
     );
     let peer_id = session.lc.read().unwrap().get_id().to_owned();
@@ -225,7 +224,7 @@ fn cur_exclude_list() -> Vec<Chord> {
     if let Some(list) = lists.get(&peer_id) {
         return list.clone();
     }
-    let list = parse_list(&session.get_option(KEYBOARD_EXCLUDE_SHORTCUTS_OPTION.to_owned()));
+    let list = parse_list(&session.get_option(OPTION_KEYBOARD_EXCLUDE_SHORTCUTS.to_owned()));
     lists.insert(peer_id, list.clone());
     list
 }
@@ -421,7 +420,7 @@ fn send_packet_char(event: &Event, is_press: bool) -> Option<Event> {
     key_event.down = true;
     key_event.press = true;
     key_event.mode = base::message_proto::KeyboardMode::Legacy.into();
-    hbb_common::log::info!("[kbd] unicode packet {:?} sent as text", key_event.seq());
+    hbb_common::log::trace!("[kbd] unicode packet sent as text");
     super::send_key_event(&key_event);
     None
 }
@@ -471,10 +470,13 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         return None;
     }
     if hooked && is_packet_event(event) {
+        if recording_active() {
+            return Some(None);
+        }
         return Some(send_packet_char(event, is_press));
     }
     let Ok(mut state) = STATE.try_lock() else {
-        hbb_common::log::warn!("keyboard exclude: hook state busy, default path");
+        hbb_common::log::trace!("keyboard exclude: hook state busy, default path");
         return None;
     };
     while state
@@ -581,7 +583,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         state.held.retain(|_, e| is_key_down(e.platform_code));
         reset(&mut *state);
         if !state.diverted {
-            hbb_common::log::info!("keyboard exclude: divert ended, no diverted modifier is down");
+            hbb_common::log::trace!("keyboard exclude: divert ended, no diverted modifier is down");
         }
     }
     if state.diverted {
@@ -594,7 +596,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         }
         reset(&mut *state);
         if !state.diverted {
-            hbb_common::log::info!("keyboard exclude: divert ended");
+            hbb_common::log::trace!("keyboard exclude: divert ended");
         }
         return None;
     }
@@ -609,7 +611,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
             && held_bits_before & MOD_WIN == 0
             && registered_hotkey(held_bits_before, event.platform_code);
         if hotkey {
-            hbb_common::log::info!(
+            hbb_common::log::trace!(
                 "keyboard exclude: {} is a registered hotkey on this PC",
                 chord.to_canonical()
             );
@@ -627,7 +629,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         }
         inject_local(&mut state, event.position_code, true);
         state.diverted = true;
-        hbb_common::log::info!("keyboard exclude: diverted {}", chord.to_canonical());
+        hbb_common::log::trace!("keyboard exclude: diverted {}", chord.to_canonical());
         return Some(None);
     }
 
@@ -651,7 +653,7 @@ pub fn on_hook_event(event: &Event, key: Key, is_press: bool, hooked: bool) -> O
         inject_local(&mut state, event.position_code, true);
         inject_local(&mut state, event.position_code, false);
         state.diverted = true;
-        hbb_common::log::info!("keyboard exclude: diverted {}", chord.to_canonical());
+        hbb_common::log::trace!("keyboard exclude: diverted {}", chord.to_canonical());
         reset(&mut *state);
         return Some(None);
     }
@@ -736,7 +738,7 @@ fn probe_next_hooks(probe: ProbeInput, event: &Event, is_main_key: bool) -> Opti
     if !suppressed {
         return None;
     }
-    hbb_common::log::info!(
+    hbb_common::log::trace!(
         "[kbd] vk=0x{:x} pos=0x{:x}: swallowed by a later keyboard hook (hotkey), not sent",
         event.platform_code,
         pos
@@ -750,6 +752,16 @@ fn probe_next_hooks(probe: ProbeInput, event: &Event, is_main_key: bool) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_separators_survive_as_key_names() {
+        assert_eq!(normalize_chord("ctrl+comma"), "Ctrl+Comma");
+        assert_eq!(normalize_chord("Ctrl+NumPlus"), "Ctrl+NumPlus");
+        assert_eq!(
+            list_to_string(&parse_list("Ctrl+Comma,Ctrl+NumPlus")),
+            "Ctrl+Comma,Ctrl+NumPlus"
+        );
+    }
 
     #[test]
     fn parse_and_normalize() {

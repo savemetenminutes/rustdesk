@@ -621,9 +621,12 @@ impl<T: InvokeUiSession> Remote<T> {
         allow_err!(
             peer.send(&crate::client::audio_devices::host_microphone_message(
                 !device.is_empty(),
-                self.handler.lc.read().unwrap().get_option(
-                    crate::client::audio_devices::OPTION_AUDIO_HOST_INPUT_SPEAKERS,
-                ) == "Y",
+                crate::client::audio_devices::plays_on_speakers(
+                    &self.handler.lc.read().unwrap().get_option(
+                        crate::client::audio_devices::OPTION_AUDIO_HOST_INPUT_SPEAKERS,
+                    ),
+                    &device,
+                ),
             ))
                 .await
         );

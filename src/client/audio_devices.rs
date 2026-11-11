@@ -20,8 +20,17 @@ pub const INPUT_OVERRIDE_PREFIX: &str = "=";
 /// Peer option: this side's input device streamed into the controlled side's virtual microphone; "" = none (the
 /// controlled side records from its own input as configured there).
 pub const OPTION_AUDIO_HOST_INPUT_DEVICE: &str = "audio-host-input-device";
-/// Peer option: "Y" also plays the streamed microphone on the controlled side's speakers.
+/// Peer option `{"<input device of this side>": true}`: the device's stream also plays on the controlled side's
+/// speakers.
 pub const OPTION_AUDIO_HOST_INPUT_SPEAKERS: &str = "audio-host-input-speakers";
+
+/// Whether input device `device` plays on the controlled side's speakers (`OPTION_AUDIO_HOST_INPUT_SPEAKERS` JSON).
+pub fn plays_on_speakers(option_json: &str, device: &str) -> bool {
+    serde_json::from_str::<std::collections::HashMap<String, bool>>(option_json)
+        .ok()
+        .and_then(|m| m.get(device).copied())
+        .unwrap_or(false)
+}
 /// Peer option holding the saved mute state of a session: "Y" muted, "N" unmuted; absent or "" starts muted.
 pub const OPTION_AUDIO_MUTE_SAVED: &str = "audio-mute-saved";
 

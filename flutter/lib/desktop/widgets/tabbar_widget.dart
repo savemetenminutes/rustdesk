@@ -217,6 +217,9 @@ class DesktopTabController {
   void closeBy(String? key) {
     if (!isDesktop) return;
     assert(onRemoved != null);
+    if (kWindowType == WindowType.RemoteDesktop) {
+      reportDisplayWindowNow();
+    }
     if (key == null) {
       if (state.value.selected < state.value.tabs.length) {
         remove(state.value.selected);

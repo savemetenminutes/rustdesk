@@ -2598,6 +2598,10 @@ impl<T: InvokeUiSession> Remote<T> {
                     Some(misc::Union::FollowCurrentDisplay(d_idx)) => {
                         self.handler.set_current_display(d_idx);
                     }
+                    Some(misc::Union::RecordingLevel(level)) => {
+                        let peer_id = self.handler.lc.read().unwrap().get_id().to_owned();
+                        crate::client::audio_devices::set_remote_recording_level(&peer_id, level);
+                    }
                     Some(misc::Union::AudioInputs(inputs)) => {
                         let peer_id = self.handler.lc.read().unwrap().get_id().to_owned();
                         crate::client::audio_devices::set_remote_inputs(&peer_id, inputs);

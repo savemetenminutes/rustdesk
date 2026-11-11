@@ -859,6 +859,30 @@ pub fn session_control_remote_recording_device(
     }
 }
 
+/// Peak level (0..1) of this side's input device `device` since the previous call (starts a level meter).
+pub fn main_get_input_level(device: String) -> SyncReturn<f64> {
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "ios")))]
+    return SyncReturn(crate::audio_level::level(&device) as f64);
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "ios"))]
+    {
+        let _ = device;
+        SyncReturn(0.0)
+    }
+}
+
+/// The last peak level (0..1) of the peer's default recording device, and asks the peer for the next one.
+pub fn session_get_remote_recording_level(session_id: SessionID) -> SyncReturn<f64> {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        let peer_id = session.lc.read().unwrap().get_id().to_owned();
+        crate::client::Interface::send(
+            &*session,
+            crate::client::Data::Message(crate::client::audio_devices::request_recording_level_message()),
+        );
+        return SyncReturn(crate::client::audio_devices::remote_recording_level(&peer_id) as f64);
+    }
+    SyncReturn(0.0)
+}
+
 /// Asks the peer to install virtual microphone driver `driver` ("vb-cable"); the peer's following `AudioInputs`
 /// report the outcome (`virtual_microphone_install`).
 pub fn session_install_remote_virtual_microphone(session_id: SessionID, driver: String) {

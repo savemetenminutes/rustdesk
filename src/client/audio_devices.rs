@@ -26,6 +26,8 @@ pub const OPTION_AUDIO_MUTE_SAVED: &str = "audio-mute-saved";
 lazy_static::lazy_static! {
     /// Peer id → output device name ("" = default output device).
     static ref OUTPUT_SELECTIONS: RwLock<HashMap<String, String>> = Default::default();
+    /// Peer id → the last `Misc.recording_level` received from that peer.
+    static ref REMOTE_RECORDING_LEVELS: Mutex<HashMap<String, f32>> = Default::default();
     /// Peer id → the last `AudioInputs` received from that peer.
     static ref REMOTE_INPUTS: Mutex<HashMap<String, AudioInputs>> = Default::default();
 }
@@ -63,6 +65,31 @@ pub fn set_output_selection(peer_id: &str, device: &str) {
         .write()
         .unwrap()
         .insert(peer_id.to_owned(), device.to_owned());
+}
+
+pub fn set_remote_recording_level(peer_id: &str, level: f32) {
+    REMOTE_RECORDING_LEVELS
+        .lock()
+        .unwrap()
+        .insert(peer_id.to_owned(), level);
+}
+
+pub fn remote_recording_level(peer_id: &str) -> f32 {
+    REMOTE_RECORDING_LEVELS
+        .lock()
+        .unwrap()
+        .get(peer_id)
+        .copied()
+        .unwrap_or_default()
+}
+
+/// `Misc.request_recording_level`.
+pub fn request_recording_level_message() -> Message {
+    let mut misc = Misc::new();
+    misc.set_request_recording_level(true);
+    let mut msg = Message::new();
+    msg.set_misc(misc);
+    msg
 }
 
 pub fn set_remote_inputs(peer_id: &str, inputs: AudioInputs) {

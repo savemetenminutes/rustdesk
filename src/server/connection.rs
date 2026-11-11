@@ -4084,6 +4084,20 @@ impl Connection {
                             self.send(audio_inputs_message(String::new())).await;
                         }
                     }
+                    Some(misc::Union::RequestRecordingLevel(_)) => {
+                        if self.audio {
+                            #[cfg(windows)]
+                            {
+                                let name = super::virtual_microphone::default_recording_name();
+                                let level = if name.is_empty() { 0.0 } else { crate::audio_level::level(&name) };
+                                let mut misc = Misc::new();
+                                misc.set_recording_level(level);
+                                let mut msg_out = Message::new();
+                                msg_out.set_misc(misc);
+                                self.send(msg_out).await;
+                            }
+                        }
+                    }
                     Some(misc::Union::RecordingDeviceControl(c)) => {
                         if self.audio {
                             #[cfg(windows)]

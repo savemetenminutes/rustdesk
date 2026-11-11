@@ -1,5 +1,7 @@
 // Audio dialog of a remote desktop session (Rust: `src/client/audio_devices.rs`, `src/client/audio_volume.rs`,
-// `src/server/virtual_microphone.rs`). Groups, each with the volume (and boost) of its selected device right below it:
+// `src/server/virtual_microphone.rs`, `src/audio_level.rs`). Two columns, OUTPUT (left) and INPUT (right); each group
+// shows the volume (and boost) of its selected device right below it, a microphone group also its level meter: the
+// level of this PC's device is read on this PC, the level of the remote PC's device on the remote PC.
 //
 // - Output on this PC: "Windows default" follows the current Windows default output device; a named device that is
 //   not present plays on the Windows default until it is present again.
@@ -11,6 +13,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
@@ -146,6 +149,10 @@ void audioDevicesDialog(FFI ffi) async {
   var closed = false;
   // Slider values while dragging, keyed by group and device.
   final dragging = <String, double>{};
+  // Peak levels (0..1) of the selected microphones, refreshed by `levelTimer`.
+  var localLevel = 0.0;
+  var remoteLevel = 0.0;
+  Timer? levelTimer;
 
   ffi.dialogManager.show((setState, close, context) {
     void setRemote(_RemoteInputs? r) {
@@ -163,7 +170,49 @@ void audioDevicesDialog(FFI ffi) async {
     if (!fetchStarted) {
       fetchStarted = true;
       _fetchRemoteInputs(ffi).then(setRemote);
+      levelTimer = Timer.periodic(const Duration(milliseconds: 150), (t) {
+        if (closed) {
+          t.cancel();
+          return;
+        }
+        final l = hostInput.isEmpty
+            ? 0.0
+            : bind.mainGetInputLevel(device: hostInput);
+        final rl = (remote?.defaultRecording ?? '').isEmpty
+            ? 0.0
+            : bind.sessionGetRemoteRecordingLevel(sessionId: sessionId);
+        try {
+          setState(() {
+            localLevel = l;
+            remoteLevel = rl;
+          });
+        } catch (e) {
+          t.cancel();
+        }
+      });
     }
+
+    // Level indicator: peak (0..1) on a square-root scale, so speech is visible.
+    Widget levelMeter(double level) => Padding(
+          padding: const EdgeInsets.only(left: 48, right: 8, top: 2, bottom: 4),
+          child: Row(
+            children: [
+              SizedBox(width: 110, child: Text('Level')),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: level <= 0 ? 0 : (level.clamp(0.0, 1.0) as double),
+                    minHeight: 8,
+                    color: level > 0.9 ? Colors.red : Colors.green,
+                    backgroundColor: Colors.grey.withOpacity(0.25),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 64),
+            ],
+          ),
+        );
 
     // Follows the `AudioInputs` the remote PC sends after a change, for up to `seconds`.
     void followRemote(int seconds, bool Function(_RemoteInputs r) done) {
@@ -344,6 +393,7 @@ void audioDevicesDialog(FFI ffi) async {
           : "Loading the remote PC's devices..."));
     } else {
       List<Widget> recordingControls(String device) => [
+            levelMeter(remoteLevel <= 0 ? 0 : sqrtLevel(remoteLevel)),
             if (r.defaultRecordingVolume >= 0)
               slider(
                   'remote_recording/$device',
@@ -392,6 +442,7 @@ void audioDevicesDialog(FFI ffi) async {
       ...hostInputs.map((d) => radio(
               d, d, hostInput, hostEnabled ? setHostInput : null,
               whenSelected: [
+                levelMeter(localLevel <= 0 ? 0 : sqrtLevel(localLevel)),
                 volumeSlider('host_input', d),
                 if (hostBoost != null)
                   boostSlider('host_boost/$d', hostBoost!, (x) {
@@ -452,15 +503,24 @@ void audioDevicesDialog(FFI ffi) async {
 
     void onClose() {
       closed = true;
+      levelTimer?.cancel();
       close();
     }
+
+    Widget sectionTitle(String text) => Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(text,
+              style: const TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+        );
 
     return CustomAlertDialog(
       title: Text('Audio devices'),
       content: SizedBox(
-        width: 560,
-        height: 720,
-        child: ListView(
+        width: 1180,
+        height: 760,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
@@ -497,13 +557,34 @@ void audioDevicesDialog(FFI ffi) async {
               ],
             ),
             const Divider(),
-            ...outputGroup,
-            const Divider(),
-            ...remoteMicGroup,
-            const Divider(),
-            ...hostGroup,
-            const Divider(),
-            ...hearGroup,
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        sectionTitle('OUTPUT'),
+                        ...outputGroup,
+                        const Divider(),
+                        ...hearGroup,
+                      ],
+                    ),
+                  ),
+                  const VerticalDivider(width: 32, thickness: 1),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        sectionTitle('INPUT'),
+                        ...remoteMicGroup,
+                        const Divider(),
+                        ...hostGroup,
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -516,3 +597,7 @@ void audioDevicesDialog(FFI ffi) async {
     );
   });
 }
+
+/// Square-root scale of a peak level (0..1) for the level indicator.
+double sqrtLevel(double level) =>
+    level <= 0 ? 0 : math.sqrt(level.clamp(0.0, 1.0).toDouble());

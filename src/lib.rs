@@ -2,6 +2,8 @@
 mod audio_resampler;
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "ios")))]
 pub mod audio_device_thread;
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "ios")))]
+pub mod audio_level;
 mod keyboard;
 /// cbindgen:ignore
 pub mod platform;

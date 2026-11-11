@@ -180,6 +180,39 @@ unsafe fn find_recording(name: &str) -> windows::core::Result<Option<Endpoint>> 
     Ok(endpoints(eCapture)?.into_iter().find(|e| e.name == name))
 }
 
+/// Makes endpoint `id` the Windows default of its flow for every role (`IPolicyConfig::SetDefaultEndpoint`).
+unsafe fn set_default_endpoint(id: &str) -> windows::core::Result<()> {
+    let unknown: IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)?;
+    let mut raw: *mut c_void = std::ptr::null_mut();
+    unknown.query(&IID_IPOLICY_CONFIG, &mut raw).ok()?;
+    let policy = IUnknown::from_raw(raw);
+    type SetDefaultEndpoint = unsafe extern "system" fn(*mut c_void, PCWSTR, i32) -> HRESULT;
+    let vtable = *(policy.as_raw() as *const *const usize);
+    let set: SetDefaultEndpoint = std::mem::transmute(*vtable.add(SET_DEFAULT_ENDPOINT_SLOT));
+    let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+    for role in [eConsole, eMultimedia, eCommunications] {
+        set(policy.as_raw(), PCWSTR(wide.as_ptr()), role.0).ok()?;
+    }
+    Ok(())
+}
+
+/// Endpoint id of the Windows default (`eConsole`) of `flow`.
+unsafe fn default_endpoint_id(flow: EDataFlow) -> Option<String> {
+    let device = enumerator().ok()?.GetDefaultAudioEndpoint(flow, eConsole).ok()?;
+    device_id(&device).ok()
+}
+
+/// Friendly name of the default recording device; "" when there is none.
+pub fn default_recording_name() -> String {
+    crate::audio_device_thread::run(|| unsafe {
+        enumerator()
+            .and_then(|e| e.GetDefaultAudioEndpoint(eCapture, eConsole))
+            .and_then(|d| friendly_name(&d))
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
 /// Makes recording endpoint `name` the Windows default recording device for every role.
 pub fn set_default_recording(name: &str) {
     let name = name.to_owned();
@@ -188,17 +221,7 @@ pub fn set_default_recording(name: &str) {
             let Some(endpoint) = find_recording(&name)? else {
                 return Ok(false);
             };
-            let unknown: IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)?;
-            let mut raw: *mut c_void = std::ptr::null_mut();
-            unknown.query(&IID_IPOLICY_CONFIG, &mut raw).ok()?;
-            let policy = IUnknown::from_raw(raw);
-            type SetDefaultEndpoint = unsafe extern "system" fn(*mut c_void, PCWSTR, i32) -> HRESULT;
-            let vtable = *(policy.as_raw() as *const *const usize);
-            let set: SetDefaultEndpoint = std::mem::transmute(*vtable.add(SET_DEFAULT_ENDPOINT_SLOT));
-            let wide: Vec<u16> = endpoint.id.encode_utf16().chain(std::iter::once(0)).collect();
-            for role in [eConsole, eMultimedia, eCommunications] {
-                set(policy.as_raw(), PCWSTR(wide.as_ptr()), role.0).ok()?;
-            }
+            set_default_endpoint(&endpoint.id)?;
             Ok(true)
         })();
         match result {
@@ -266,10 +289,24 @@ pub fn install(driver: &str) -> hbb_common::ResultType<()> {
     if !status.success() {
         bail!("Expand-Archive exited with {status}");
     }
+    // The VB-CABLE setup makes its endpoints the default playback and recording devices; the previous defaults are put
+    // back afterwards (the recording default is chosen in the controller's Audio dialog).
+    let previous = crate::audio_device_thread::run(|| unsafe {
+        (default_endpoint_id(eRender), default_endpoint_id(eCapture))
+    })
+    .unwrap_or_default();
     let setup = dir.join("VBCABLE_Setup_x64.exe");
     log::info!("Running {} -i -h", setup.display());
     let status = std::process::Command::new(&setup).args(["-i", "-h"]).status()?;
     log::info!("VB-CABLE setup exited with {status}");
+    crate::audio_device_thread::run(move || unsafe {
+        for id in [previous.0, previous.1].into_iter().flatten() {
+            match set_default_endpoint(&id) {
+                Ok(()) => log::info!("Default endpoint {id} restored after the VB-CABLE setup"),
+                Err(e) => log::error!("Failed to restore default endpoint {id}: {e}"),
+            }
+        }
+    });
     if detect().is_none() {
         return Err(anyhow!("the installer exited ({status}) and no virtual microphone is present"));
     }

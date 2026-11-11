@@ -104,6 +104,31 @@ class CachedPeerData {
   }
 }
 
+/// How long an established session keeps retrying after it was lost (the controlled side's service restarts,
+/// the PC reboots).
+const int kLostSessionRetrySecs = 300;
+
+/// Longest wait, in seconds, between two automatic reconnect attempts.
+const int kMaxReconnectDelaySecs = 8;
+
+/// The wait before the reconnect attempt after one that waited `current` seconds.
+int nextReconnectDelay(int current) =>
+    current * 2 > kMaxReconnectDelaySecs ? kMaxReconnectDelaySecs : current * 2;
+
+/// A reset of a session that was established, reported as a relay hint: the controlled side restarted; retrying
+/// beats offering a relay.
+bool isLostSessionReset(String type, String text) =>
+    (type == 'relay-hint' || type == 'relay-hint2') &&
+    (text.contains('10054') || text.contains('104'));
+
+/// A reconnect that could not reach the controlled side's service: `Failed to connect to ...`, `Failed to connect
+/// via relay server`, `Failed to make direct connection to remote desktop`, each followed by `: Please try later`.
+bool isLostSessionConnectFailure(String type, String title, String text) =>
+    type == 'error' &&
+    title == 'Connection Error' &&
+    text.startsWith('Failed to') &&
+    text.contains('Please try later');
+
 class FfiModel with ChangeNotifier {
   CachedPeerData cachedPeerData = CachedPeerData();
   PeerInfo _pi = PeerInfo();
@@ -122,6 +147,7 @@ class FfiModel with ChangeNotifier {
   Timer? _restartReconnectDelayTimer;
   var _reconnects = 1;
   DateTime? _offlineReconnectStartTime;
+  DateTime? _lostSessionRetryStartTime;
   bool _androidDocumentPickerActive = false;
   bool _androidDocumentPickerInterruptedConnection = false;
   bool _viewOnly = false;
@@ -959,9 +985,8 @@ class FfiModel with ChangeNotifier {
       showWaitUacDialog(sessionId, dialogManager, type);
     } else if (type == 'elevation-error') {
       showElevationError(sessionId, type, title, text, dialogManager);
-    } else if ((type == 'relay-hint' || type == 'relay-hint2') &&
-        _pi.isSet.isTrue &&
-        (text.contains('10054') || text.contains('104')) &&
+    } else if (_pi.isSet.isTrue &&
+        isLostSessionReset(type, text) &&
         _lostSessionRetryAllowed()) {
       // A reset while reconnecting a session that was established: the controlled side is restarting, not
       // blocked by a firewall; retry instead of offering a relay.
@@ -1036,28 +1061,19 @@ class FfiModel with ChangeNotifier {
     }
     // A session that was established (`_pi.isSet`) and whose reconnect cannot reach the controlled side's service
     // (it restarts after an update, the PC reboots) retries for `_kLostSessionRetrySecs`.
-    if (type == 'error' &&
-        title == 'Connection Error' &&
-        text.startsWith('Failed to connect to') &&
-        text.contains('Please try later') &&
-        _pi.isSet.isTrue) {
+    if (_pi.isSet.isTrue && isLostSessionConnectFailure(type, title, text)) {
       return _lostSessionRetryAllowed();
     }
     return false;
   }
 
-  /// Starts the lost-session retry window on the first call; true while it lasts. A successful peer info resets
-  /// `_offlineReconnectStartTime`.
+  /// Starts the lost-session retry window on the first call; true while it lasts. A successful peer info or a
+  /// message without retry resets it.
   bool _lostSessionRetryAllowed() {
-    _offlineReconnectStartTime ??= DateTime.now();
-    return DateTime.now().difference(_offlineReconnectStartTime!).inSeconds <
-        _kLostSessionRetrySecs;
+    _lostSessionRetryStartTime ??= DateTime.now();
+    return DateTime.now().difference(_lostSessionRetryStartTime!).inSeconds <
+        kLostSessionRetrySecs;
   }
-
-  static const int _kLostSessionRetrySecs = 300;
-
-  /// Longest wait between two automatic reconnect attempts.
-  static const int _kMaxReconnectDelaySecs = 8;
 
   handleToast(Map<String, dynamic> evt, SessionID sessionId, String peerId) {
     final type = evt['type'] ?? 'info';
@@ -1125,12 +1141,11 @@ class FfiModel with ChangeNotifier {
       _timer = Timer(Duration(seconds: _reconnects), () {
         reconnect(dialogManager, sessionId, false);
       });
-      _reconnects = _reconnects * 2 > _kMaxReconnectDelaySecs
-          ? _kMaxReconnectDelaySecs
-          : _reconnects * 2;
+      _reconnects = nextReconnectDelay(_reconnects);
     } else {
       _reconnects = 1;
       _offlineReconnectStartTime = null;
+      _lostSessionRetryStartTime = null;
     }
   }
 
@@ -1442,6 +1457,7 @@ class FfiModel with ChangeNotifier {
     if (isMobile) {
       virtualMouseMode.loadOptions();
     }
+    _lostSessionRetryStartTime = null;
     if (connType == ConnType.fileTransfer) {
       parent.target?.fileModel.onReady();
     } else if (connType == ConnType.terminal) {

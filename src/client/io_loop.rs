@@ -132,6 +132,7 @@ impl<T: InvokeUiSession> Remote<T> {
         sender: mpsc::UnboundedSender<Data>,
     ) -> Self {
         let peer_id = handler.lc.read().unwrap().get_id().to_owned();
+        crate::client::audio_volume::load(&peer_id, |k| handler.lc.read().unwrap().get_option(k));
         crate::client::audio_devices::set_output_selection(
             &peer_id,
             &handler
@@ -616,7 +617,27 @@ impl<T: InvokeUiSession> Remote<T> {
             peer.send(&crate::client::audio_devices::host_microphone_message(!device.is_empty()))
                 .await
         );
+        crate::client::audio_volume::set_capture_gain(100);
         if !device.is_empty() {
+            let (volumes, boosts) = {
+                let lc = self.handler.lc.read().unwrap();
+                (
+                    lc.get_option(crate::client::audio_volume::OPTION_VOLUME_HOST_INPUT),
+                    lc.get_option(crate::client::audio_volume::OPTION_BOOST_HOST_INPUT),
+                )
+            };
+            crate::client::audio_volume::set_capture_gain(
+                crate::client::audio_volume::parse_percent_map(&volumes)
+                    .get(&device)
+                    .copied()
+                    .unwrap_or(100),
+            );
+            #[cfg(windows)]
+            if let Some(db) = crate::client::audio_volume::parse_db_map(&boosts).get(&device) {
+                crate::client::microphone_boost::set(&device, *db);
+            }
+            #[cfg(not(windows))]
+            let _ = boosts;
             log::info!("Streaming input device \"{device}\" to the remote virtual microphone");
             self.stop_host_microphone_sender = self.start_microphone_stream(Some(device));
         }

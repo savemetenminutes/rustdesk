@@ -83,6 +83,30 @@ void audioDevicesDialog(FFI ffi) async {
   } catch (e) {
     debugPrint('Failed to parse input devices: $e');
   }
+  // Stored volumes (percent) per device and the output device that plays (Rust `audio_volume`).
+  Map<String, dynamic> volumes = {};
+  void loadVolumes() {
+    try {
+      volumes = jsonDecode(bind.sessionGetAudioVolumes(sessionId: sessionId))
+          as Map<String, dynamic>;
+    } catch (e) {
+      volumes = {};
+    }
+  }
+
+  loadVolumes();
+  // Microphone Boost (dB) of `hostInput`: {"min", "max", "step", "current"}, or null when the device has none.
+  Map<String, dynamic>? boostOf(String device) {
+    if (device.isEmpty) return null;
+    try {
+      final raw = bind.mainGetMicrophoneBoost(device: device);
+      return raw.isEmpty ? null : jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  var boost = boostOf(hostInput);
   var muted = bind.sessionGetToggleOptionSync(
       sessionId: sessionId, arg: kOptionToggleDisableAudio);
   var muteSaved = await bind.sessionGetPeerOption(
@@ -126,8 +150,45 @@ void audioDevicesDialog(FFI ffi) async {
 
     void setHostInput(String v) {
       bind.sessionSetHostMicrophone(sessionId: sessionId, device: v);
-      setState(() => hostInput = v);
+      setState(() {
+        hostInput = v;
+        boost = boostOf(v);
+      });
     }
+
+    int volumeOf(String kind, String device) {
+      final m = volumes[kind];
+      if (m is Map && m[device] is num) return (m[device] as num).toInt();
+      return 100;
+    }
+
+    // A volume slider (0..200 %) stored per peer and per `device`.
+    Widget volumeSlider(String label, String kind, String device) => Row(
+          children: [
+            SizedBox(width: 150, child: Text(label)),
+            Expanded(
+              child: Slider(
+                min: 0,
+                max: 200,
+                divisions: 40,
+                value: volumeOf(kind, device).toDouble(),
+                label: '${volumeOf(kind, device)} %',
+                onChanged: (v) {
+                  final m = Map<String, dynamic>.from(
+                      (volumes[kind] as Map?) ?? <String, dynamic>{});
+                  m[device] = v.round();
+                  setState(() => volumes[kind] = m);
+                },
+                onChangeEnd: (v) => bind.sessionSetAudioVolume(
+                    sessionId: sessionId,
+                    kind: kind,
+                    device: device,
+                    percent: v.round()),
+              ),
+            ),
+            SizedBox(width: 48, child: Text('${volumeOf(kind, device)} %')),
+          ],
+        );
 
     void setInput(String v) {
       bind.sessionSetRemoteAudioInput(sessionId: sessionId, value: v);
@@ -154,6 +215,8 @@ void audioDevicesDialog(FFI ffi) async {
 
     final r = remote;
     final virtualMic = r?.virtualMicrophone ?? '';
+    final playingOutput = (volumes['playing_output'] as String?) ?? '';
+    final b = boost;
     final microphoneItems = <Widget>[
       radio("Remote PC's own input, as configured there", '', hostInput,
           setHostInput),
@@ -161,6 +224,43 @@ void audioDevicesDialog(FFI ffi) async {
       if (hostInput.isNotEmpty && !hostInputs.contains(hostInput))
         radio('$hostInput (not present, default input device is used)',
             hostInput, hostInput, setHostInput),
+      if (hostInput.isNotEmpty)
+        volumeSlider('Volume', 'host_input', hostInput),
+      if (hostInput.isNotEmpty && b != null)
+        Row(
+          children: [
+            SizedBox(width: 150, child: Text('Microphone boost')),
+            Expanded(
+              child: Slider(
+                min: (b['min'] as num).toDouble(),
+                max: (b['max'] as num).toDouble(),
+                divisions: ((b['step'] as num) > 0)
+                    ? (((b['max'] as num) - (b['min'] as num)) /
+                            (b['step'] as num))
+                        .round()
+                        .clamp(1, 100)
+                    : null,
+                value: (b['current'] as num)
+                    .toDouble()
+                    .clamp((b['min'] as num).toDouble(),
+                        (b['max'] as num).toDouble()),
+                label: '${(b['current'] as num).toStringAsFixed(1)} dB',
+                onChanged: (v) => setState(() => boost = {...b, 'current': v}),
+                onChangeEnd: (v) {
+                  final m = Map<String, dynamic>.from(
+                      (volumes['boost'] as Map?) ?? <String, dynamic>{});
+                  m[hostInput] = v;
+                  volumes['boost'] = m;
+                  bind.sessionSetMicrophoneBoost(
+                      sessionId: sessionId, device: hostInput, db: v);
+                },
+              ),
+            ),
+            SizedBox(
+                width: 48,
+                child: Text('${(b['current'] as num).toStringAsFixed(1)} dB')),
+          ],
+        ),
       ListTile(
         dense: true,
         title: Text(r == null
@@ -211,7 +311,7 @@ void audioDevicesDialog(FFI ffi) async {
       title: Text('Audio devices'),
       content: SizedBox(
         width: 460,
-        height: 600,
+        height: 720,
         child: ListView(
           children: [
             Row(
@@ -252,6 +352,12 @@ void audioDevicesDialog(FFI ffi) async {
             Text('Output on this PC',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             ...outputItems,
+            volumeSlider(
+                playingOutput.isEmpty
+                    ? 'Volume'
+                    : 'Volume of "$playingOutput"',
+                'output',
+                playingOutput),
             const Divider(),
             Text('Microphone of the remote PC',
                 style: TextStyle(fontWeight: FontWeight.bold)),
@@ -260,6 +366,7 @@ void audioDevicesDialog(FFI ffi) async {
             Text('Sound you hear from the remote PC (captured there)',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             ...inputItems,
+            volumeSlider('Volume', 'remote_input', input),
           ],
         ),
       ),

@@ -94,6 +94,9 @@ use crate::ui_session_interface::SessionPermissionConfig;
 pub use super::lang::*;
 
 pub mod audio_devices;
+pub mod audio_volume;
+#[cfg(windows)]
+pub mod microphone_boost;
 #[cfg(not(target_os = "linux"))]
 mod audio_playback;
 #[cfg(target_os = "windows")]
@@ -2527,7 +2530,7 @@ impl AudioHandler {
                     input_channels: self.channels,
                     output_channels: self.device_channel,
                 };
-                let buffer = match prepare_decoded_audio(
+                let mut buffer = match prepare_decoded_audio(
                     &buffer[0..n],
                     self.audio_resampler.as_mut(),
                     config,
@@ -2538,6 +2541,10 @@ impl AudioHandler {
                         return;
                     }
                 };
+                audio_volume::apply_gain(
+                    &mut buffer,
+                    audio_volume::playback_gain(&audio_devices::thread_peer_id()),
+                );
                 self.audio_buffer.append_pcm(&buffer);
             }
             #[cfg(target_os = "linux")]
@@ -2622,6 +2629,7 @@ fn open_output_device() -> ResultType<Device> {
     let device = resolve_output_device()?;
     let name = device.name().unwrap_or_default();
     log::info!("Using output device: \"{name}\"");
+    audio_volume::set_playing_output(&audio_devices::thread_peer_id(), &name);
     OPENED_OUTPUT_DEVICE.with(|o| *o.borrow_mut() = Some(name));
     Ok(device)
 }

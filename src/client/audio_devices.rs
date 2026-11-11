@@ -39,6 +39,11 @@ pub fn set_thread_peer_id(peer_id: &str) {
     THREAD_PEER_ID.with(|p| *p.borrow_mut() = peer_id.to_owned());
 }
 
+/// Peer id of the current audio playback thread.
+pub fn thread_peer_id() -> String {
+    THREAD_PEER_ID.with(|p| p.borrow().clone())
+}
+
 /// Output device selected for the peer of the current audio playback thread.
 pub fn thread_output_selection() -> String {
     THREAD_PEER_ID.with(|p| output_selection(&p.borrow()))

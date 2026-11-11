@@ -453,7 +453,15 @@ mod cpal_impl {
             let mut send_packet = |packet: &[f32]| {
                 let packet =
                     audio_capture::rechannel(packet, config.device_channel, rechannel_buffer);
-                sender.submit(packet);
+                // `capture_gain()` is 1 except while this process streams a controller microphone.
+                let gain = crate::client::audio_volume::capture_gain();
+                if (gain - 1.0).abs() < 0.001 {
+                    sender.submit(packet);
+                } else {
+                    let mut scaled = packet.to_vec();
+                    crate::client::audio_volume::apply_gain(&mut scaled, gain);
+                    sender.submit(&scaled);
+                }
             };
             if let Some(resampler) = self.resampler.as_mut() {
                 resampler.process_with(data, send_packet).with_context(|| {

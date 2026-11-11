@@ -2045,32 +2045,41 @@ class _DisplayMenuState extends State<_DisplayMenu> {
                   ffi.connType == ConnType.defaultConn &&
                   e.actionId == kShortcutActionToggleMute))
               .toList();
+          if (v.isEmpty) return Offstage();
           // "Sync clipboard between sessions" (local option `allow-sync-clipboard-between-sessions`, also in
-          // Settings → General): a clipboard received from one session is forwarded to the other sessions.
-          final syncClipboard = ffi.connType == ConnType.defaultConn
-              ? StatefulBuilder(
-                  builder: (context, setState) => CkbMenuButton(
-                      value: bind.mainGetLocalOption(
-                              key: kOptionAllowSyncClipboardBetweenSessions) ==
-                          'Y',
-                      onChanged: (value) async {
-                        if (value == null) return;
-                        await bind.mainSetLocalOption(
-                            key: kOptionAllowSyncClipboardBetweenSessions,
-                            value: value ? 'Y' : 'N');
-                        setState(() {});
-                      },
-                      child: Text(translate('Sync clipboard between sessions')),
-                      ffi: ffi))
-              : null;
-          if (v.isEmpty && syncClipboard == null) return Offstage();
+          // Settings → General) sits indented under "Disable clipboard": a clipboard received from one session is
+          // forwarded to the other sessions, which needs this session's clipboard enabled; disabled, the entry is
+          // greyed out.
+          Widget syncClipboard(bool clipboardDisabled) => Padding(
+                padding: const EdgeInsets.only(left: 24),
+                child: StatefulBuilder(
+                    builder: (context, setState) => CkbMenuButton(
+                        value: bind.mainGetLocalOption(
+                                key: kOptionAllowSyncClipboardBetweenSessions) ==
+                            'Y',
+                        onChanged: clipboardDisabled
+                            ? null
+                            : (value) async {
+                                if (value == null) return;
+                                await bind.mainSetLocalOption(
+                                    key: kOptionAllowSyncClipboardBetweenSessions,
+                                    value: value ? 'Y' : 'N');
+                                setState(() {});
+                              },
+                        child: Text(
+                            translate('Sync clipboard between sessions')),
+                        ffi: ffi)),
+              );
           return Column(children: [
-            ...v.map((e) => CkbMenuButton(
-                value: e.value,
-                onChanged: e.onChanged,
-                child: e.child,
-                ffi: ffi)),
-            if (syncClipboard != null) syncClipboard,
+            for (final e in v) ...[
+              CkbMenuButton(
+                  value: e.value,
+                  onChanged: e.onChanged,
+                  child: e.child,
+                  ffi: ffi),
+              if (e.actionId == kShortcutActionToggleDisableClipboard)
+                syncClipboard(e.value),
+            ],
           ]);
         });
   }

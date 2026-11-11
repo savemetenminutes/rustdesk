@@ -2468,16 +2468,20 @@ class CanvasModel with ChangeNotifier {
   Timer? _scrollRestoreTimer;
   static const Duration _kScrollSettle = Duration(seconds: 3);
 
-  void endScrollRestore() {
+  void endScrollRestore([String reason = '']) {
     if (!scrollRestorePending) return;
+    if (reason.isNotEmpty) {
+      displayWindowsLog('scroll restore ended: $reason');
+    }
     scrollRestorePending = false;
     _scrollRestoreTimer?.cancel();
     _scrollRestoreTimer = null;
   }
 
-  /// Jumps the scroll controllers to the pixel offsets `x` / `y` once the scrollbars are attached (checked every
-  /// 200 ms for up to 10 s; scroll-auto mode attaches none), and jumps them back for `_kScrollSettle` whenever a
-  /// re-layout moves them (the first frames re-layout the canvas and reset the offsets).
+  /// Jumps the scroll controllers to the pixel offsets `x` / `y` once the scrollbars are attached and their extents
+  /// reach the offsets (checked every 200 ms, for up to 10 s / 15 s; scroll-auto mode attaches none), and jumps them
+  /// back whenever a re-layout moves them (the first frames after a connect or reconnect re-layout the canvas and
+  /// reset the offsets). It ends `_kScrollSettle` after the last correction.
   void restoreScrollOffset(double? x, double? y) {
     endScrollRestore();
     scrollRestorePending = true;
@@ -2488,6 +2492,20 @@ class CanvasModel with ChangeNotifier {
       if (!_horizontal.hasClients && !_vertical.hasClients) {
         if (attachedAt == null && tries >= 50) {
           displayWindowsLog('scroll restore x=$x y=$y: no scrollbar attached in 10 s');
+          endScrollRestore();
+        }
+        return;
+      }
+      // Before the first frame of a (re)connect the canvas has no extent yet; an offset beyond the extent is applied
+      // once the extent reaches it.
+      final reachable =
+          (x == null || !_horizontal.hasClients || _horizontal.position.maxScrollExtent >= x - 0.5) &&
+              (y == null || !_vertical.hasClients || _vertical.position.maxScrollExtent >= y - 0.5);
+      if (!reachable) {
+        if (tries >= 75) {
+          displayWindowsLog('scroll restore x=$x y=$y: extent '
+              'maxX=${_horizontal.hasClients ? _horizontal.position.maxScrollExtent : null} '
+              'maxY=${_vertical.hasClients ? _vertical.position.maxScrollExtent : null} did not reach it in 15 s');
           endScrollRestore();
         }
         return;
@@ -2513,6 +2531,7 @@ class CanvasModel with ChangeNotifier {
             'maxY=${_vertical.hasClients ? _vertical.position.maxScrollExtent : null}');
         updateScrollPercent();
         notifyListeners();
+        attachedAt = DateTime.now();
       }
       attachedAt ??= DateTime.now();
       if (DateTime.now().difference(attachedAt!) >= _kScrollSettle) {
@@ -2906,7 +2925,7 @@ class CanvasModel with ChangeNotifier {
 
     setScrollPercent(scrollPixelPercent.x, scrollPixelPercent.y);
     pushScrollPositionToUI(scrollPixel.x, scrollPixel.y);
-    endScrollRestore();
+    endScrollRestore('edge scroll');
     reportDisplayWindowSoon();
 
     notifyListeners();

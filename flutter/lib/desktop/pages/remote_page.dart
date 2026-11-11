@@ -1186,11 +1186,14 @@ class _ImagePaintState extends State<ImagePaint> {
       return NotificationListener<ScrollNotification>(
           onNotification: (notification) {
             c.updateScrollPercent();
-            // A user scroll ends a pending restore; programmatic jumps send no `UserScrollNotification`.
-            if (notification is UserScrollNotification ||
-                (notification is ScrollUpdateNotification &&
-                    notification.dragDetails != null)) {
-              c.endScrollRestore();
+            // A user scroll (wheel: a `UserScrollNotification` with a direction; drag: drag details) ends a pending
+            // restore. A re-layout or a programmatic jump also sends `UserScrollNotification`, with direction idle.
+            if (notification is UserScrollNotification &&
+                notification.direction.name != 'idle') {
+              c.endScrollRestore('user scroll (${notification.direction.name})');
+            } else if (notification is ScrollUpdateNotification &&
+                notification.dragDetails != null) {
+              c.endScrollRestore('user drag');
             }
             reportDisplayWindowSoon();
             return false;

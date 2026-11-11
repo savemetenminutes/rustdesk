@@ -336,15 +336,21 @@ void audioDevicesDialog(FFI ffi) async {
               step > 0 ? ((max - min) / step).round().clamp(1, 100) : null);
     }
 
+    // A device name never wraps (`wrap: false`); an explanatory label may.
     Widget radio(String label, String value, String group,
             void Function(String)? onChanged,
-            {List<Widget> whenSelected = const []}) =>
+            {List<Widget> whenSelected = const [], bool wrap = false}) =>
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             RadioListTile<String>(
               dense: true,
-              title: Text(label),
+              title: wrap
+                  ? Text(label)
+                  : Text(label,
+                      softWrap: false,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
               value: value,
               groupValue: group,
               onChanged: onChanged == null ? null : (v) => onChanged(v ?? ''),
@@ -421,7 +427,8 @@ void audioDevicesDialog(FFI ffi) async {
             'Select this option to install "VB-CABLE Virtual Audio Device" (https://vb-audio.com/Cable/)',
             'install:vb-cable',
             r.defaultRecording,
-            (_) => installVirtualMicrophone()));
+            (_) => installVirtualMicrophone(),
+            wrap: true));
       }
       if (r.install == 'installing') {
         remoteMicGroup.add(note(
@@ -514,11 +521,47 @@ void audioDevicesDialog(FFI ffi) async {
                   fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         );
 
+    // Panel size: the smaller of the natural layout (every device name on one line, a full volume row) and 80 % of the
+    // window, in each dimension.
+    final window = MediaQuery.of(context).size;
+    final nameStyle = Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 14);
+    double textWidth(String t) {
+      final painter = TextPainter(
+          text: TextSpan(text: t, style: nameStyle),
+          maxLines: 1,
+          textDirection: TextDirection.ltr)
+        ..layout();
+      return painter.width;
+    }
+
+    double widest(Iterable<String> names, double extra) =>
+        names.fold(0.0, (w, n) => w > textWidth(n) + extra ? w : textWidth(n) + extra);
+    // Radio (48) + list tile padding (32) + a margin (24); a suffix such as " (virtual microphone, fed from this PC)".
+    const radioExtra = 104.0;
+    const sliderRow = 48 + 110 + 280 + 64 + 16.0;
+    final leftNames = [
+      ...outputs,
+      'Windows default (follows changes)',
+      ...?r?.devices,
+      "Remote PC's own setting (${r?.ownSetting ?? ''})",
+    ];
+    final rightNames = [
+      ...?r?.recordingDevices.map((d) =>
+          d == virtualMic ? '$d (virtual microphone, fed from this PC)' : d),
+      ...hostInputs,
+    ];
+    final leftWidth = [widest(leftNames, radioExtra), sliderRow].reduce((a, b) => a > b ? a : b);
+    final rightWidth = [widest(rightNames, radioExtra), sliderRow].reduce((a, b) => a > b ? a : b);
+    final naturalWidth = leftWidth + rightWidth + 32 + 16;
+    final panelWidth = naturalWidth < window.width * 0.8 ? naturalWidth : window.width * 0.8;
+    final panelHeight = window.height * 0.8 - 160;
+
     return CustomAlertDialog(
       title: Text('Audio devices'),
+      contentBoxConstraints: BoxConstraints(maxWidth: panelWidth),
       content: SizedBox(
-        width: 1180,
-        height: 760,
+        width: panelWidth,
+        height: panelHeight < 300 ? 300 : panelHeight,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

@@ -1251,10 +1251,6 @@ impl Connection {
             try_stop_record_cursor_pos();
         }
         super::audio_service::set_connection_input_device(conn.inner.id(), None);
-        #[cfg(windows)]
-        if conn.host_microphone.take().is_some() {
-            super::virtual_microphone::deactivate(conn.inner.id());
-        }
         conn.on_close("End", true).await;
         log::info!("#{} connection loop exited", id);
     }
@@ -4085,20 +4081,26 @@ impl Connection {
                     // (`disable_audio`): a muted controller still chooses the capture device.
                     Some(misc::Union::RequestAudioInputs(_)) => {
                         if self.audio {
-                            let mut misc = Misc::new();
-                            misc.set_audio_inputs(AudioInputs {
-                                devices: super::audio_service::get_capture_devices(),
-                                own_setting: Config::get_option("audio-input"),
-                                system_sound: super::audio_service::empty_input_is_system_sound(),
-                                #[cfg(windows)]
-                                virtual_microphone: super::virtual_microphone::detect()
-                                    .map(|p| p.recording_name)
-                                    .unwrap_or_default(),
-                                ..Default::default()
-                            });
-                            let mut msg_out = Message::new();
-                            msg_out.set_misc(misc);
-                            self.send(msg_out).await;
+                            self.send(audio_inputs_message(String::new())).await;
+                        }
+                    }
+                    Some(misc::Union::RecordingDeviceControl(c)) => {
+                        if self.audio {
+                            #[cfg(windows)]
+                            {
+                                if c.set_default {
+                                    super::virtual_microphone::set_default_recording(&c.device);
+                                }
+                                if c.volume >= 0 {
+                                    super::virtual_microphone::set_recording_volume(&c.device, c.volume as u32);
+                                }
+                                if c.set_boost {
+                                    crate::client::microphone_boost::set(&c.device, c.boost_db);
+                                }
+                            }
+                            #[cfg(not(windows))]
+                            let _ = c;
+                            self.send(audio_inputs_message(String::new())).await;
                         }
                     }
                     #[cfg(windows)]
@@ -4106,20 +4108,7 @@ impl Connection {
                         if self.audio {
                             let mut inner = self.inner.clone();
                             let send_inputs = move |inner: &mut ConnInner, status: String| {
-                                let mut misc = Misc::new();
-                                misc.set_audio_inputs(AudioInputs {
-                                    devices: super::audio_service::get_capture_devices(),
-                                    own_setting: Config::get_option("audio-input"),
-                                    system_sound: super::audio_service::empty_input_is_system_sound(),
-                                    virtual_microphone: super::virtual_microphone::detect()
-                                        .map(|p| p.recording_name)
-                                        .unwrap_or_default(),
-                                    virtual_microphone_install: status,
-                                    ..Default::default()
-                                });
-                                let mut msg = Message::new();
-                                msg.set_misc(misc);
-                                inner.send(Arc::new(msg));
+                                inner.send(Arc::new(audio_inputs_message(status)));
                             };
                             send_inputs(&mut inner, "installing".to_owned());
                             std::thread::spawn(move || {
@@ -5387,20 +5376,19 @@ impl Connection {
         }
     }
 
-    /// Starts (`active`) or ends the controller's microphone in this side's virtual microphone
+    /// Starts (`active`) or ends the controller's microphone in this side's virtual microphone. The controller offers it
+    /// only while the virtual microphone is the default recording device (`AudioInputs.default_recording`)
     /// (`virtual_microphone`); the controller's following `AudioFormat` opens playback on its playback endpoint.
     fn set_host_microphone(&mut self, active: bool) {
         let id = self.inner.id();
         if !active {
             if self.host_microphone.take().is_some() {
                 drop(self.audio_sender.take());
-                #[cfg(windows)]
-                super::virtual_microphone::deactivate(id);
             }
             return;
         }
         #[cfg(windows)]
-        match super::virtual_microphone::activate(id) {
+        match super::virtual_microphone::detect() {
             Some(pair) => {
                 let key = format!("host-microphone-{id}");
                 crate::client::audio_devices::set_output_selection(&key, &pair.playback_name);
@@ -7978,4 +7966,39 @@ mod test {
         assert!(!replaced_by(&conn(3, remote, key(8, "peer")), 2, &mine));
         assert!(!replaced_by(&conn(3, remote, key(7, "other")), 2, &mine));
     }
+}
+
+/// `Misc.audio_inputs`: this side's capture devices (what the controller hears), recording devices with the default
+/// one's volume and boost, the virtual microphone, and `install` (the outcome of a virtual microphone install).
+fn audio_inputs_message(install: String) -> Message {
+    let mut inputs = AudioInputs {
+        devices: super::audio_service::get_capture_devices(),
+        own_setting: Config::get_option("audio-input"),
+        system_sound: super::audio_service::empty_input_is_system_sound(),
+        virtual_microphone_install: install,
+        default_recording_volume: -1,
+        ..Default::default()
+    };
+    #[cfg(windows)]
+    {
+        let state = super::virtual_microphone::recording_state();
+        inputs.recording_devices = state.devices;
+        inputs.default_recording = state.default;
+        inputs.default_recording_volume = state.default_volume;
+        inputs.default_recording_boost = state
+            .default_boost
+            .map(|(min, max, step, current)| {
+                serde_json::json!({"min": min, "max": max, "step": step, "current": current}).to_string()
+            })
+            .unwrap_or_default();
+        inputs.virtual_microphone = state
+            .virtual_microphone
+            .map(|p| p.recording_name)
+            .unwrap_or_default();
+    }
+    let mut misc = Misc::new();
+    misc.set_audio_inputs(inputs);
+    let mut msg = Message::new();
+    msg.set_misc(misc);
+    msg
 }

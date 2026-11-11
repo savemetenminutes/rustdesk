@@ -1909,6 +1909,33 @@ impl<T: InvokeUiSession> Remote<T> {
                                     .await
                                 );
                             }
+                            // Stored volume and boost of the peer's recording devices; a device the peer does not have
+                            // is ignored there.
+                            let (volumes, boosts) = {
+                                let lc = self.handler.lc.read().unwrap();
+                                (
+                                    crate::client::audio_volume::parse_percent_map(&lc.get_option(
+                                        crate::client::audio_volume::OPTION_VOLUME_REMOTE_RECORDING,
+                                    )),
+                                    crate::client::audio_volume::parse_db_map(&lc.get_option(
+                                        crate::client::audio_volume::OPTION_BOOST_REMOTE_RECORDING,
+                                    )),
+                                )
+                            };
+                            let mut devices: Vec<&String> = volumes.keys().chain(boosts.keys()).collect();
+                            devices.sort();
+                            devices.dedup();
+                            for device in devices {
+                                allow_err!(
+                                    peer.send(&crate::client::audio_devices::recording_device_control_message(
+                                        device,
+                                        false,
+                                        volumes.get(device).map_or(-1, |v| *v as i32),
+                                        boosts.get(device).copied(),
+                                    ))
+                                    .await
+                                );
+                            }
                             let host_input = self.handler.lc.read().unwrap().get_option(
                                 crate::client::audio_devices::OPTION_AUDIO_HOST_INPUT_DEVICE,
                             );

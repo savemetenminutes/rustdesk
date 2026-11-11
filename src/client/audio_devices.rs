@@ -82,6 +82,10 @@ pub fn remote_inputs_json(peer_id: &str) -> String {
             "system_sound": inputs.system_sound,
             "virtual_microphone": inputs.virtual_microphone,
             "virtual_microphone_install": inputs.virtual_microphone_install,
+            "recording_devices": inputs.recording_devices,
+            "default_recording": inputs.default_recording,
+            "default_recording_volume": inputs.default_recording_volume,
+            "default_recording_boost": inputs.default_recording_boost,
         })
         .to_string(),
         None => "".to_owned(),
@@ -95,6 +99,27 @@ pub fn clear_remote_inputs(peer_id: &str) {
 pub fn request_inputs_message() -> Message {
     let mut misc = Misc::new();
     misc.set_request_audio_inputs(true);
+    let mut msg = Message::new();
+    msg.set_misc(misc);
+    msg
+}
+
+/// `Misc.recording_device_control`: on the controlled side, makes `device` the default recording device
+/// (`set_default`), sets its endpoint volume (`volume` percent, -1 leaves it) and its Microphone Boost (`boost_db`).
+pub fn recording_device_control_message(
+    device: &str,
+    set_default: bool,
+    volume: i32,
+    boost_db: Option<f32>,
+) -> Message {
+    let mut c = RecordingDeviceControl::new();
+    c.device = device.to_owned();
+    c.set_default = set_default;
+    c.volume = volume;
+    c.set_boost = boost_db.is_some();
+    c.boost_db = boost_db.unwrap_or_default();
+    let mut misc = Misc::new();
+    misc.set_recording_device_control(c);
     let mut msg = Message::new();
     msg.set_misc(misc);
     msg

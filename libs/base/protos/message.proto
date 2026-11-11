@@ -885,6 +885,8 @@ message Misc {
     // Controller -> controlled: install the named virtual microphone driver ("vb-cable"); the controlled side answers
     // with `AudioInputs` once the installer ends.
     string install_virtual_microphone = 1005;
+    // Controller -> controlled: change a recording device of the controlled side; answered with `AudioInputs`.
+    RecordingDeviceControl recording_device_control = 1006;
   }
 }
 
@@ -906,6 +908,26 @@ message AudioInputs {
   // Outcome of the last `install_virtual_microphone` of this connection: "" none, "installing", "installed",
   // "failed: <reason>".
   string virtual_microphone_install = 5;
+  // Active recording endpoints (Windows friendly names), the virtual microphone's included.
+  repeated string recording_devices = 6;
+  // Default recording endpoint.
+  string default_recording = 7;
+  // Endpoint volume of `default_recording`, percent; -1 unknown.
+  int32 default_recording_volume = 8;
+  // Microphone Boost of `default_recording`: `{"min","max","step","current"}` dB, or "" when it has none.
+  string default_recording_boost = 9;
+}
+
+message RecordingDeviceControl {
+  // Recording endpoint name.
+  string device = 1;
+  // Make it the default recording device for every role.
+  bool set_default = 2;
+  // Endpoint volume, percent; -1 leaves it.
+  int32 volume = 3;
+  // Set the Microphone Boost to `boost_db`.
+  bool set_boost = 4;
+  float boost_db = 5;
 }
 
 message AudioInputSelection {

@@ -25,6 +25,12 @@ pub const OPTION_VOLUME_HOST_INPUT: &str = "audio-volume-host-input";
 /// Peer option `{"<input device>": <dB>}`: the hardware Microphone Boost level applied when the device is streamed.
 pub const OPTION_BOOST_HOST_INPUT: &str = "audio-boost-host-input";
 pub const MAX_PERCENT: u32 = 200;
+/// Peer option `{"<recording device of the peer>": <percent 0..=100>}`: endpoint volume of the peer's recording devices,
+/// sent after every login.
+pub const OPTION_VOLUME_REMOTE_RECORDING: &str = "audio-volume-remote-recording";
+/// Peer option `{"<recording device of the peer>": <dB>}`: Microphone Boost of the peer's recording devices, sent after
+/// every login.
+pub const OPTION_BOOST_REMOTE_RECORDING: &str = "audio-boost-remote-recording";
 
 #[derive(Default)]
 struct PeerVolumes {

@@ -1,24 +1,25 @@
-//! The controlled side's virtual microphone: a virtual audio cable whose playback endpoint carries the controller's
-//! microphone stream and whose recording endpoint the controlled side's applications record from.
+//! The controlled side's recording devices and its virtual microphone.
 //!
-//! - `detect()` returns the first installed pair of `PAIRS` (active endpoints, matched by friendly name).
-//! - `activate(conn_id)` makes the pair's recording endpoint the Windows default recording device for every role
-//!   (`eConsole`, `eMultimedia`, `eCommunications`) and returns the playback endpoint's name, which the connection's
-//!   audio playback thread opens. The defaults in place before the first activation are restored by
-//!   `deactivate(conn_id)` of the last active connection.
+//! - `recording_state()` lists the active recording endpoints (friendly names), the default recording endpoint
+//!   (`eConsole`) with its endpoint volume and Microphone Boost, and the virtual microphone pair.
+//! - `set_default_recording(name)` makes a recording endpoint the Windows default for every role (`eConsole`,
+//!   `eMultimedia`, `eCommunications`); the change stays after the session ends.
+//! - The virtual microphone is a virtual audio cable (`PAIRS`): the controller's microphone stream plays into its
+//!   playback endpoint and arrives on its recording endpoint, which applications record from once it is the default.
 //!
 //! Windows has no public API to change a default endpoint; `IPolicyConfig::SetDefaultEndpoint` (the interface the
 //! Sound control panel uses) is called through its vtable. All calls run on `crate::audio_device_thread`.
 
 use hbb_common::log;
-use std::{collections::HashSet, ffi::c_void, sync::Mutex};
+use std::ffi::c_void;
 use windows::{
-    core::{Interface, GUID, HRESULT, IUnknown, PCWSTR},
+    core::{IUnknown, Interface, GUID, HRESULT, PCWSTR},
     Win32::{
         Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
         Media::Audio::{
-            eCapture, eCommunications, eConsole, eMultimedia, eRender, EDataFlow, IMMDevice,
-            IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+            eCapture, eCommunications, eConsole, eMultimedia, eRender, EDataFlow,
+            Endpoints::IAudioEndpointVolume, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
+            DEVICE_STATE_ACTIVE,
         },
         System::Com::{
             CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
@@ -47,23 +48,24 @@ pub struct Pair {
     pub driver: String,
     pub playback_name: String,
     pub recording_name: String,
-    recording_id: String,
 }
 
-struct State {
-    /// Connections with an active controller microphone.
-    active: HashSet<i32>,
-    /// Default recording endpoint ids per role (`eConsole`, `eMultimedia`, `eCommunications`) before activation.
-    previous: Option<[Option<String>; 3]>,
-}
-
-lazy_static::lazy_static! {
-    static ref STATE: Mutex<State> = Mutex::new(State { active: HashSet::new(), previous: None });
+/// Recording side of this PC as `recording_state()` reads it.
+#[derive(Clone, Debug, Default)]
+pub struct RecordingState {
+    pub devices: Vec<String>,
+    pub default: String,
+    /// Endpoint volume of `default`, percent; -1 when unknown.
+    pub default_volume: i32,
+    /// Microphone Boost of `default`: `(min, max, step, current)` dB.
+    pub default_boost: Option<(f32, f32, f32, f32)>,
+    pub virtual_microphone: Option<Pair>,
 }
 
 struct Endpoint {
     id: String,
     name: String,
+    device: IMMDevice,
 }
 
 unsafe fn enumerator() -> windows::core::Result<IMMDeviceEnumerator> {
@@ -80,79 +82,151 @@ unsafe fn device_id(device: &IMMDevice) -> windows::core::Result<String> {
     Ok(s)
 }
 
+unsafe fn friendly_name(device: &IMMDevice) -> windows::core::Result<String> {
+    Ok(device
+        .OpenPropertyStore(STGM_READ)?
+        .GetValue(&PKEY_Device_FriendlyName)?
+        .to_string())
+}
+
 unsafe fn endpoints(flow: EDataFlow) -> windows::core::Result<Vec<Endpoint>> {
     let collection = enumerator()?.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)?;
     let mut out = Vec::new();
     for i in 0..collection.GetCount()? {
         let device = collection.Item(i)?;
-        let store = device.OpenPropertyStore(STGM_READ)?;
-        let name = store.GetValue(&PKEY_Device_FriendlyName)?.to_string();
         out.push(Endpoint {
             id: device_id(&device)?,
-            name,
+            name: friendly_name(&device)?,
+            device,
         });
     }
     Ok(out)
 }
 
-unsafe fn detect_inner() -> windows::core::Result<Option<Pair>> {
-    let playback = endpoints(eRender)?;
-    let recording = endpoints(eCapture)?;
+unsafe fn pair(playback: &[Endpoint], recording: &[Endpoint]) -> Option<Pair> {
     for (driver, play_pattern, rec_pattern) in PAIRS {
         let p = playback.iter().find(|e| e.name.contains(play_pattern));
         let r = recording.iter().find(|e| e.name.contains(rec_pattern));
         if let (Some(p), Some(r)) = (p, r) {
-            return Ok(Some(Pair {
+            return Some(Pair {
                 driver: driver.to_string(),
                 playback_name: p.name.clone(),
                 recording_name: r.name.clone(),
-                recording_id: r.id.clone(),
-            }));
+            });
         }
     }
-    Ok(None)
+    None
 }
 
 /// The first installed virtual microphone of `PAIRS`.
 pub fn detect() -> Option<Pair> {
-    crate::audio_device_thread::run(|| match unsafe { detect_inner() } {
-        Ok(pair) => pair,
-        Err(e) => {
-            log::error!("Virtual microphone detection failed: {e}");
-            None
+    crate::audio_device_thread::run(|| unsafe {
+        match (endpoints(eRender), endpoints(eCapture)) {
+            (Ok(p), Ok(r)) => pair(&p, &r),
+            (Err(e), _) | (_, Err(e)) => {
+                log::error!("Virtual microphone detection failed: {e}");
+                None
+            }
         }
     })
     .flatten()
 }
 
-unsafe fn default_recording_ids() -> windows::core::Result<[Option<String>; 3]> {
-    let e = enumerator()?;
-    let mut out: [Option<String>; 3] = Default::default();
-    for (i, role) in [eConsole, eMultimedia, eCommunications].into_iter().enumerate() {
-        out[i] = match e.GetDefaultAudioEndpoint(eCapture, role) {
-            Ok(d) => Some(device_id(&d)?),
-            Err(_) => None,
-        };
-    }
-    Ok(out)
-}
-
-unsafe fn set_default_recording(ids: &[Option<String>; 3]) -> windows::core::Result<()> {
-    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-    let unknown: IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)?;
-    let mut raw: *mut c_void = std::ptr::null_mut();
-    unknown.query(&IID_IPOLICY_CONFIG, &mut raw).ok()?;
-    let policy = IUnknown::from_raw(raw);
-    type SetDefaultEndpoint = unsafe extern "system" fn(*mut c_void, PCWSTR, i32) -> HRESULT;
-    let vtable = *(policy.as_raw() as *const *const usize);
-    let set: SetDefaultEndpoint = std::mem::transmute(*vtable.add(SET_DEFAULT_ENDPOINT_SLOT));
-    for (i, role) in [eConsole, eMultimedia, eCommunications].into_iter().enumerate() {
-        if let Some(id) = &ids[i] {
-            let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
-            set(policy.as_raw(), PCWSTR(wide.as_ptr()), role.0).ok()?;
+unsafe fn recording_state_inner() -> windows::core::Result<RecordingState> {
+    let recording = endpoints(eCapture)?;
+    let playback = endpoints(eRender)?;
+    let mut state = RecordingState {
+        devices: recording.iter().map(|e| e.name.clone()).collect(),
+        default_volume: -1,
+        virtual_microphone: pair(&playback, &recording),
+        ..Default::default()
+    };
+    if let Ok(default) = enumerator()?.GetDefaultAudioEndpoint(eCapture, eConsole) {
+        state.default = friendly_name(&default)?;
+        if let Ok(volume) = default.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) {
+            if let Ok(level) = volume.GetMasterVolumeLevelScalar() {
+                state.default_volume = (level * 100.0).round() as i32;
+            }
         }
     }
-    Ok(())
+    Ok(state)
+}
+
+/// The recording devices, the default one with its volume and boost, and the virtual microphone.
+pub fn recording_state() -> RecordingState {
+    let mut state = crate::audio_device_thread::run(|| match unsafe { recording_state_inner() } {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("Reading the recording devices failed: {e}");
+            RecordingState { default_volume: -1, ..Default::default() }
+        }
+    })
+    .unwrap_or_default();
+    if !state.default.is_empty() {
+        state.default_boost = crate::client::microphone_boost::get(&state.default)
+            .map(|b| (b.min, b.max, b.step, b.current));
+    }
+    log::info!(
+        "Recording devices: {:?}, default {:?} ({}%), virtual microphone {:?}",
+        state.devices,
+        state.default,
+        state.default_volume,
+        state.virtual_microphone.as_ref().map(|p| &p.recording_name)
+    );
+    state
+}
+
+unsafe fn find_recording(name: &str) -> windows::core::Result<Option<Endpoint>> {
+    Ok(endpoints(eCapture)?.into_iter().find(|e| e.name == name))
+}
+
+/// Makes recording endpoint `name` the Windows default recording device for every role.
+pub fn set_default_recording(name: &str) {
+    let name = name.to_owned();
+    crate::audio_device_thread::run(move || unsafe {
+        let result = (|| -> windows::core::Result<bool> {
+            let Some(endpoint) = find_recording(&name)? else {
+                return Ok(false);
+            };
+            let unknown: IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)?;
+            let mut raw: *mut c_void = std::ptr::null_mut();
+            unknown.query(&IID_IPOLICY_CONFIG, &mut raw).ok()?;
+            let policy = IUnknown::from_raw(raw);
+            type SetDefaultEndpoint = unsafe extern "system" fn(*mut c_void, PCWSTR, i32) -> HRESULT;
+            let vtable = *(policy.as_raw() as *const *const usize);
+            let set: SetDefaultEndpoint = std::mem::transmute(*vtable.add(SET_DEFAULT_ENDPOINT_SLOT));
+            let wide: Vec<u16> = endpoint.id.encode_utf16().chain(std::iter::once(0)).collect();
+            for role in [eConsole, eMultimedia, eCommunications] {
+                set(policy.as_raw(), PCWSTR(wide.as_ptr()), role.0).ok()?;
+            }
+            Ok(true)
+        })();
+        match result {
+            Ok(true) => log::info!("Default recording device set to \"{name}\""),
+            Ok(false) => log::warn!("Recording device \"{name}\" is not present"),
+            Err(e) => log::error!("Failed to make \"{name}\" the default recording device: {e}"),
+        }
+    });
+}
+
+/// Sets the endpoint volume of recording endpoint `name` to `percent` (0..=100).
+pub fn set_recording_volume(name: &str, percent: u32) {
+    let name = name.to_owned();
+    crate::audio_device_thread::run(move || unsafe {
+        let result = (|| -> windows::core::Result<bool> {
+            let Some(endpoint) = find_recording(&name)? else {
+                return Ok(false);
+            };
+            let volume: IAudioEndpointVolume = endpoint.device.Activate(CLSCTX_ALL, None)?;
+            volume.SetMasterVolumeLevelScalar(percent.min(100) as f32 / 100.0, std::ptr::null())?;
+            Ok(true)
+        })();
+        match result {
+            Ok(true) => log::info!("Volume of recording device \"{name}\" set to {percent}%"),
+            Ok(false) => log::warn!("Recording device \"{name}\" is not present"),
+            Err(e) => log::error!("Failed to set the volume of \"{name}\": {e}"),
+        }
+    });
 }
 
 /// Download of VB-CABLE (https://vb-audio.com/Cable/): driver pack with `VBCABLE_Setup_x64.exe`.
@@ -200,54 +274,4 @@ pub fn install(driver: &str) -> hbb_common::ResultType<()> {
         return Err(anyhow!("the installer exited ({status}) and no virtual microphone is present"));
     }
     Ok(())
-}
-
-/// Makes the virtual microphone the default recording device for connection `conn_id`; returns the pair, whose
-/// `playback_name` the connection's playback thread MUST open. `None` when no virtual microphone is installed.
-pub fn activate(conn_id: i32) -> Option<Pair> {
-    let pair = detect()?;
-    let recording_id = pair.recording_id.clone();
-    let ok = crate::audio_device_thread::run(move || unsafe {
-        let mut state = STATE.lock().unwrap();
-        if state.previous.is_none() {
-            state.previous = Some(default_recording_ids()?);
-        }
-        let target = [Some(recording_id.clone()), Some(recording_id.clone()), Some(recording_id)];
-        set_default_recording(&target)?;
-        state.active.insert(conn_id);
-        windows::core::Result::Ok(())
-    });
-    match ok {
-        Some(Ok(())) => {
-            log::info!(
-                "Virtual microphone active for connection {conn_id}: {} plays into {} ({})",
-                pair.playback_name,
-                pair.recording_name,
-                pair.driver
-            );
-            Some(pair)
-        }
-        Some(Err(e)) => {
-            log::error!("Failed to make {} the default recording device: {e}", pair.recording_name);
-            None
-        }
-        None => None,
-    }
-}
-
-/// Ends the virtual microphone of connection `conn_id`; the last active connection restores the previous default
-/// recording devices.
-pub fn deactivate(conn_id: i32) {
-    crate::audio_device_thread::run(move || unsafe {
-        let mut state = STATE.lock().unwrap();
-        if !state.active.remove(&conn_id) || !state.active.is_empty() {
-            return;
-        }
-        if let Some(previous) = state.previous.take() {
-            match set_default_recording(&previous) {
-                Ok(()) => log::info!("Virtual microphone inactive; default recording devices restored"),
-                Err(e) => log::error!("Failed to restore the default recording devices: {e}"),
-            }
-        }
-    });
 }

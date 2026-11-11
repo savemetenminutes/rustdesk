@@ -817,6 +817,48 @@ pub fn session_get_remote_audio_inputs(session_id: SessionID) -> SyncReturn<Stri
     SyncReturn("".to_owned())
 }
 
+/// Changes recording device `device` of the peer: `set_default` makes it the peer's default recording device,
+/// `volume` (percent, -1 leaves it) and `boost_db` (with `set_boost`) set its endpoint volume and Microphone Boost.
+/// Volume and boost are stored per peer and per device (peer options `audio-volume-remote-recording`,
+/// `audio-boost-remote-recording`) and sent again after every login.
+pub fn session_control_remote_recording_device(
+    session_id: SessionID,
+    device: String,
+    set_default: bool,
+    volume: i32,
+    set_boost: bool,
+    boost_db: f64,
+) {
+    use crate::client::audio_volume as v;
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        if volume >= 0 {
+            let json = v::with_entry(
+                &session.get_option(v::OPTION_VOLUME_REMOTE_RECORDING.to_owned()),
+                &device,
+                volume.clamp(0, 100) as u32,
+            );
+            session.set_option(v::OPTION_VOLUME_REMOTE_RECORDING.to_owned(), json);
+        }
+        if set_boost {
+            let json = v::with_entry(
+                &session.get_option(v::OPTION_BOOST_REMOTE_RECORDING.to_owned()),
+                &device,
+                boost_db as f32,
+            );
+            session.set_option(v::OPTION_BOOST_REMOTE_RECORDING.to_owned(), json);
+        }
+        crate::client::Interface::send(
+            &*session,
+            crate::client::Data::Message(crate::client::audio_devices::recording_device_control_message(
+                &device,
+                set_default,
+                volume,
+                set_boost.then_some(boost_db as f32),
+            )),
+        );
+    }
+}
+
 /// Asks the peer to install virtual microphone driver `driver` ("vb-cable"); the peer's following `AudioInputs`
 /// report the outcome (`virtual_microphone_install`).
 pub fn session_install_remote_virtual_microphone(session_id: SessionID, driver: String) {

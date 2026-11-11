@@ -1549,9 +1549,17 @@ class FfiModel with ChangeNotifier {
 
   /// Pins this window's view style and custom scale (`windowViewStyles`, `windowCustomScalePercents`) to the stored
   /// state of its display (`loadDisplayWindows()`), else to the peer's current values, and restores the stored scroll
-  /// offsets. Runs once per session.
+  /// offsets. The view style and scale are pinned once per session; the scroll offsets are restored on every peer
+  /// info, because a reconnect re-lays out the canvas and resets them to 0.
   Future<void> _initWindowView(String peerId) async {
     if (_windowViewInitialized) {
+      final stored = loadDisplayWindows(peerId)[_pi.currentDisplay];
+      if (stored?.scrollX != null || stored?.scrollY != null) {
+        displayWindowsLog('reconnect scroll restore session=$sessionId peer=$peerId '
+            'display=${_pi.currentDisplay} x=${stored!.scrollX} y=${stored.scrollY}');
+        parent.target?.canvasModel
+            .restoreScrollOffset(stored.scrollX, stored.scrollY);
+      }
       return;
     }
     _windowViewInitialized = true;

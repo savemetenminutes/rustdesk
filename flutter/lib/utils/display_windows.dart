@@ -353,6 +353,8 @@ Future<void> reportDisplayWindowNow() async {
   if (stateGlobal.isMinimized) {
     return;
   }
+  // Taken before the first await: a tab being closed is removed right after this call (`DesktopTabController.closeBy`).
+  final sessions = _sessions!();
   final wc = WindowController.fromWindowId(windowId);
   final isFullscreen = stateGlobal.fullscreen.isTrue;
   Rect current;
@@ -389,7 +391,7 @@ Future<void> reportDisplayWindowNow() async {
       !currentScreen.contains(_normalFrame!.center)) {
     _normalFrame = _moveOntoScreen(screens, _normalFrame!, currentScreen);
   }
-  for (final session in _sessions!()) {
+  for (final session in sessions) {
     final peerId = session.peerId;
     final display = session.display;
     final stored = loadDisplayWindows(peerId)[display];

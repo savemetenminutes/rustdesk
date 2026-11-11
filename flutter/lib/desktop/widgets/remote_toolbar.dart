@@ -3089,12 +3089,13 @@ class _CloseSessionMenu extends StatelessWidget {
               color: Colors.white, size: _ToolbarTheme.buttonSize * 0.625),
         ),
       ),
-      tooltip: 'Close session (all windows)',
+      tooltip: translate('Close session in all windows'),
       onPressed: () async {
+        // With the other windows closed, this window ends the connection, so the end-of-connection note applies.
+        await closePeerSessionsInOtherWindows(id);
         if (await showConnEndAuditDialogCloseCanceled(ffi: ffi)) {
           return;
         }
-        await closePeerSessionsInOtherWindows(id);
         closeConnection(id: id);
       },
       color: _ToolbarTheme.redColor,

@@ -102,11 +102,11 @@ pub fn input_selection_message(option_value: &str) -> Message {
     msg
 }
 
-/// Output device names of this side (devices with an output configuration).
+/// Output device names of this side (devices with an output configuration). Runs on
+/// `crate::audio_device_thread`, which keeps CPAL's process-global device enumerator valid.
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "ios")))]
 pub fn get_output_devices() -> Vec<String> {
-    // The device enumeration initializes COM; run it off the caller's thread.
-    std::thread::spawn(|| {
+    crate::audio_device_thread::run(|| {
         use cpal::traits::{DeviceTrait, HostTrait};
         let mut out = Vec::new();
         if let Ok(devices) = cpal::default_host().output_devices() {
@@ -121,7 +121,6 @@ pub fn get_output_devices() -> Vec<String> {
         }
         out
     })
-    .join()
     .unwrap_or_default()
 }
 

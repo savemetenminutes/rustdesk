@@ -51,10 +51,11 @@ pub fn set_connection_input_device(conn_id: i32, device: Option<String>) {
     restart();
 }
 
-/// Capture device names of this side (devices with an input configuration).
+/// Capture device names of this side (devices with an input configuration). Runs on
+/// `crate::audio_device_thread`, which keeps CPAL's process-global device enumerator valid.
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub fn get_capture_devices() -> Vec<String> {
-    std::thread::spawn(|| {
+    crate::audio_device_thread::run(|| {
         use cpal::traits::{DeviceTrait, HostTrait};
         let mut out = Vec::new();
         if let Ok(devices) = cpal::default_host().devices() {
@@ -69,7 +70,6 @@ pub fn get_capture_devices() -> Vec<String> {
         }
         out
     })
-    .join()
     .unwrap_or_default()
 }
 

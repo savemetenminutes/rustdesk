@@ -22,6 +22,9 @@ const String kAudioInputOverridePrefix = '=';
 /// Session toggle option behind "Mute" (`toolbarDisplayToggle()`).
 const String kOptionToggleDisableAudio = 'disable-audio';
 
+/// Peer option with the saved mute state (Rust `audio_devices::OPTION_AUDIO_MUTE_SAVED`): "Y" / "N"; "" starts muted.
+const String kOptionAudioMuteSaved = 'audio-mute-saved';
+
 class _RemoteInputs {
   final List<String> devices;
   final String ownSetting;
@@ -63,6 +66,8 @@ void audioDevicesDialog(FFI ffi) async {
   }
   var muted = bind.sessionGetToggleOptionSync(
       sessionId: sessionId, arg: kOptionToggleDisableAudio);
+  var muteSaved = await bind.sessionGetPeerOption(
+      sessionId: sessionId, name: kOptionAudioMuteSaved);
   _RemoteInputs? remote;
   var fetchStarted = false;
   var fetchDone = false;
@@ -88,6 +93,16 @@ void audioDevicesDialog(FFI ffi) async {
     void setOutput(String v) {
       bind.sessionSetAudioOutputDevice(sessionId: sessionId, device: v);
       setState(() => output = v);
+    }
+
+    // Mutes or unmutes the running session (`disable-audio` toggle); the saved state changes only through Save/Clear.
+    Future<void> setMuted(bool v) async {
+      if (v != muted) {
+        await bind.sessionToggleOption(
+            sessionId: sessionId, value: kOptionToggleDisableAudio);
+      }
+      setState(() => muted = bind.sessionGetToggleOptionSync(
+          sessionId: sessionId, arg: kOptionToggleDisableAudio));
     }
 
     void setInput(String v) {
@@ -157,17 +172,39 @@ void audioDevicesDialog(FFI ffi) async {
         height: 480,
         child: ListView(
           children: [
-            CheckboxListTile(
-              dense: true,
-              title: Text(translate('Mute')),
-              value: muted,
-              onChanged: (v) async {
-                if (v == null || v == muted) return;
-                await bind.sessionToggleOption(
-                    sessionId: sessionId, value: kOptionToggleDisableAudio);
-                setState(() => muted = bind.sessionGetToggleOptionSync(
-                    sessionId: sessionId, arg: kOptionToggleDisableAudio));
-              },
+            Row(
+              children: [
+                Expanded(
+                  child: CheckboxListTile(
+                    dense: true,
+                    title: Text(translate('Mute')),
+                    subtitle: Text(muteSaved.isEmpty
+                        ? 'Not saved: sessions start muted'
+                        : 'Saved: sessions start ${muteSaved == 'N' ? 'unmuted' : 'muted'}'),
+                    value: muted,
+                    onChanged: (v) async {
+                      if (v == null || v == muted) return;
+                      await setMuted(v);
+                    },
+                  ),
+                ),
+                dialogButton('Save', onPressed: () async {
+                  await bind.sessionPeerOption(
+                      sessionId: sessionId,
+                      name: kOptionAudioMuteSaved,
+                      value: muted ? 'Y' : 'N');
+                  setState(() => muteSaved = muted ? 'Y' : 'N');
+                }),
+                const SizedBox(width: 8),
+                dialogButton('Clear', isOutline: true, onPressed: () async {
+                  await bind.sessionPeerOption(
+                      sessionId: sessionId,
+                      name: kOptionAudioMuteSaved,
+                      value: '');
+                  setState(() => muteSaved = '');
+                  await setMuted(true);
+                }),
+              ],
             ),
             const Divider(),
             Text('Output on this PC',

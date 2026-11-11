@@ -17,6 +17,8 @@ use std::{
 pub const OPTION_AUDIO_OUTPUT_DEVICE: &str = "audio-output-device";
 pub const OPTION_AUDIO_INPUT_DEVICE: &str = "audio-input-device";
 pub const INPUT_OVERRIDE_PREFIX: &str = "=";
+/// Peer option holding the saved mute state of a session: "Y" muted, "N" unmuted; absent or "" starts muted.
+pub const OPTION_AUDIO_MUTE_SAVED: &str = "audio-mute-saved";
 
 lazy_static::lazy_static! {
     /// Peer id → output device name ("" = default output device).

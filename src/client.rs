@@ -2994,8 +2994,21 @@ impl LoginConfigHandler {
 
         self.id = id;
         self.conn_type = conn_type;
-        let config = self.load_config();
+        let mut config = self.load_config();
         self.remember = !config.password.is_empty();
+        // A session starts muted unless the peer option `audio_devices::OPTION_AUDIO_MUTE_SAVED` holds "N". The mute
+        // toggle changes `disable_audio` for the running session only; the Audio dialog's Save/Clear write the option.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if conn_type == ConnType::DEFAULT_CONN {
+            let muted = config
+                .options
+                .get(audio_devices::OPTION_AUDIO_MUTE_SAVED)
+                .map_or(true, |v| v != "N");
+            if config.disable_audio.v != muted {
+                config.disable_audio.v = muted;
+                config.store(&self.id);
+            }
+        }
         self.config = config;
 
         let conn_token = conn_token

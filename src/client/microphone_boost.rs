@@ -45,13 +45,19 @@ unsafe fn boost_level(device_name: &str) -> Result<Option<IAudioVolumeLevel>> {
         let adapter_connector = connector.GetConnectedTo()?;
         let start: IPart = adapter_connector.cast()?;
         // Breadth-first walk upstream from the adapter connector.
-        let mut queue = vec![start];
-        let mut visited = 0;
+        // The whole device topology is walked: parts upstream and downstream of each part, and across connectors to
+        // the connector they are linked to (a boost can sit on another filter than the endpoint's connector).
+        // Breadth first: the nearest boost belongs to this device (a filter can carry other jacks' boosts too).
+        let mut queue = std::collections::VecDeque::from([start]);
+        let mut seen = std::collections::HashSet::new();
         let mut names = vec![];
-        while let Some(part) = queue.pop() {
-            visited += 1;
-            if visited > 64 {
+        while let Some(part) = queue.pop_front() {
+            if seen.len() > 256 {
                 break;
+            }
+            let id = part.GetGlobalId().map(|g| g.to_string().unwrap_or_default()).unwrap_or_default();
+            if !seen.insert(id) {
+                continue;
             }
             let part_name = part.GetName().map(|n| n.to_string().unwrap_or_default()).unwrap_or_default();
             names.push(part_name.clone());
@@ -61,10 +67,17 @@ unsafe fn boost_level(device_name: &str) -> Result<Option<IAudioVolumeLevel>> {
                     return Ok(Some(IAudioVolumeLevel::from_raw(raw)));
                 }
             }
-            if let Ok(incoming) = part.EnumPartsIncoming() {
-                for j in 0..incoming.GetCount().unwrap_or(0) {
-                    if let Ok(p) = incoming.GetPart(j) {
-                        queue.push(p);
+            for list in [part.EnumPartsIncoming(), part.EnumPartsOutgoing()].into_iter().flatten() {
+                for j in 0..list.GetCount().unwrap_or(0) {
+                    if let Ok(p) = list.GetPart(j) {
+                        queue.push_back(p);
+                    }
+                }
+            }
+            if let Ok(connector) = part.cast::<IConnector>() {
+                if let Ok(other) = connector.GetConnectedTo() {
+                    if let Ok(p) = other.cast::<IPart>() {
+                        queue.push_back(p);
                     }
                 }
             }

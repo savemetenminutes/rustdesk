@@ -825,5 +825,9 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Renew trust", "ნდობის განახლება"),
         ("install-directory-not-empty-tip", "არჩეული საქაღალდე ცარიელი არ არის. ინსტალაციამ შეიძლება წაშალოს არსებული მონაცემები. რეკომენდებულია სხვა საქაღალდის არჩევა."),
         ("Close session in all windows", ""),
+        ("Shortcuts sent to the remote PC", ""),
+        ("keyboard-exclude-tip", ""),
+        ("Press the shortcut to keep on this PC", ""),
+        ("Add a shortcut to keep on this PC", ""),
     ].iter().cloned().collect();
 }

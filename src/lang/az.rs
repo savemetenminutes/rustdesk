@@ -825,5 +825,9 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Renew trust", "Etibarı yenilə"),
         ("install-directory-not-empty-tip", "Seçilmiş qovluq boş deyil. Quraşdırma mövcud məlumatları silə bilər. Başqa qovluq seçməyiniz tövsiyə olunur."),
         ("Close session in all windows", ""),
+        ("Shortcuts sent to the remote PC", ""),
+        ("keyboard-exclude-tip", ""),
+        ("Press the shortcut to keep on this PC", ""),
+        ("Add a shortcut to keep on this PC", ""),
     ].iter().cloned().collect();
 }

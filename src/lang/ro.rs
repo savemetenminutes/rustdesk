@@ -825,5 +825,9 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Renew trust", "Reînnoiește încrederea"),
         ("install-directory-not-empty-tip", "Folderul selectat nu este gol. Instalarea poate șterge datele existente. Ia în considerare alegerea altui folder."),
         ("Close session in all windows", ""),
+        ("Shortcuts sent to the remote PC", ""),
+        ("keyboard-exclude-tip", ""),
+        ("Press the shortcut to keep on this PC", ""),
+        ("Add a shortcut to keep on this PC", ""),
     ].iter().cloned().collect();
 }

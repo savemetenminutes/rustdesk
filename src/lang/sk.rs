@@ -825,5 +825,9 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Renew trust", "Obnoviť dôveru"),
         ("install-directory-not-empty-tip", "Vybraný priečinok nie je prázdny. Inštalácia môže odstrániť existujúce údaje. Zvážte výber iného priečinka."),
         ("Close session in all windows", ""),
+        ("Shortcuts sent to the remote PC", ""),
+        ("keyboard-exclude-tip", ""),
+        ("Press the shortcut to keep on this PC", ""),
+        ("Add a shortcut to keep on this PC", ""),
     ].iter().cloned().collect();
 }

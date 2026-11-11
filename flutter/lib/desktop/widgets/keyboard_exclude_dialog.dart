@@ -66,7 +66,7 @@ void keyboardExcludeShortcutsDialog(FFI ffi) async {
     recording = false;
   }
 
-  ffi.dialogManager.show((setState, close, context) {
+  await ffi.dialogManager.show((setState, close, context) {
     void add(String chord) {
       if (chord.isEmpty) return;
       if (!excluded.contains(chord)) {
@@ -110,14 +110,14 @@ void keyboardExcludeShortcutsDialog(FFI ffi) async {
     }
 
     return CustomAlertDialog(
-      title: Text('Shortcuts sent to the remote PC'),
+      title: Text(translate('Shortcuts sent to the remote PC')),
       content: SizedBox(
         width: 420,
         height: 480,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Checked: sent to the remote PC. Unchecked: kept on this PC.'),
+            Text(translate('keyboard-exclude-tip')),
             const SizedBox(height: 8),
             Expanded(
               child: ListView(
@@ -152,9 +152,9 @@ void keyboardExcludeShortcutsDialog(FFI ffi) async {
             Row(
               children: [
                 Expanded(
-                  child: Text(recording
-                      ? 'Press the shortcut to keep on this PC...'
-                      : 'Add a shortcut to keep on this PC'),
+                  child: Text(translate(recording
+                      ? 'Press the shortcut to keep on this PC'
+                      : 'Add a shortcut to keep on this PC')),
                 ),
                 dialogButton(recording ? 'Cancel' : 'Record',
                     icon: Icon(recording
@@ -181,4 +181,5 @@ void keyboardExcludeShortcutsDialog(FFI ffi) async {
       onCancel: recording ? null : onClose,
     );
   });
+  stopRecording();
 }

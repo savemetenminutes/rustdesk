@@ -1571,6 +1571,19 @@ class RustdeskImpl {
   }
 
   void mainDisplayWindowsLog({required String message, dynamic hint}) {}
+  Future<String> sessionSetKeyboardExcludeShortcuts(
+      {required UuidValue sessionId, required String value, dynamic hint}) {
+    return Future.value('');
+  }
+
+  void mainStartKeyboardShortcutRecording({dynamic hint}) {}
+
+  void mainStopKeyboardShortcutRecording({dynamic hint}) {}
+
+  String mainTakeRecordedKeyboardShortcut({dynamic hint}) => '';
+
+  String mainNormalizeKeyboardShortcut({required String chord, dynamic hint}) =>
+      '';
 
   void mainInitInputSource({dynamic hint}) {
     throw UnimplementedError("mainIsInstalled");

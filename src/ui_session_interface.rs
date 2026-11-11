@@ -146,6 +146,14 @@ impl ConnectionRoundState {
     pub fn has_started(&self) -> bool {
         self.round > 0
     }
+
+    /// Whether `Session::reconnect()` must respect the state of the current round. A Flutter session's first round is
+    /// started by `flutter::session_start_()`, which stores no thread, so a started round counts too. Port-forward and
+    /// RDP rounds never leave `Connecting` (their io loop does not report `Connected` / `Disconnected`), so for them
+    /// only a stored thread counts, as before.
+    fn guards_reconnect(&self, thread_started: bool, port_forward: bool) -> bool {
+        thread_started || (self.has_started() && !port_forward)
+    }
 }
 
 impl Default for ConnectionRoundState {
@@ -1319,12 +1327,12 @@ impl<T: InvokeUiSession> Session<T> {
         // 2. If the connection is established, send `Data::Close`.
         // 3. If the connection is disconnected, do nothing.
         //
-        // The state check applies to every round, including the first one, which `flutter::session_start_()` starts
-        // without storing its thread in `self.thread`. Each window of a multi-window session runs its own retry timer;
-        // the timers fire together after a dropped connection, and every call that skipped this check started one more
-        // round for the same peer.
+        // Each window of a multi-window session runs its own retry timer; after a dropped connection they fire
+        // together, and every call that skipped this check started one more round for the same peer.
         let mut connection_round_state_lock = self.connection_round_state.lock().unwrap();
-        if self.thread.lock().unwrap().is_some() || connection_round_state_lock.has_started() {
+        if connection_round_state_lock
+            .guards_reconnect(self.thread.lock().unwrap().is_some(), self.is_port_forward())
+        {
             match connection_round_state_lock.state {
                 ConnectionState::Connecting => return,
                 ConnectionState::Connected => self.send(Data::Close),
@@ -2114,4 +2122,40 @@ async fn start_one_port_forward<T: InvokeUiSession>(
 async fn send_note(url: String, id: String, sid: u64, note: String) {
     let body = serde_json::json!({ "id": id, "session_id": sid, "note": note });
     allow_err!(crate::post_request(url, body.to_string(), "").await);
+}
+
+#[cfg(test)]
+mod connection_round_tests {
+    use super::*;
+
+    #[test]
+    fn first_connect_is_not_guarded() {
+        let state = ConnectionRoundState::default();
+        assert!(!state.guards_reconnect(false, false));
+    }
+
+    #[test]
+    fn retries_after_a_threadless_first_round_are_guarded() {
+        let mut state = ConnectionRoundState::default();
+        state.new_round();
+        assert!(state.guards_reconnect(false, false));
+        assert!(matches!(state.state, ConnectionState::Connecting));
+    }
+
+    #[test]
+    fn port_forward_retries_are_not_guarded_by_the_round() {
+        let mut state = ConnectionRoundState::default();
+        state.new_round();
+        assert!(!state.guards_reconnect(false, true));
+        assert!(state.guards_reconnect(true, true));
+    }
+
+    #[test]
+    fn a_newer_round_supersedes_the_older_one() {
+        let mut state = ConnectionRoundState::default();
+        let first = state.new_round();
+        let second = state.new_round();
+        assert!(state.is_round_gt(first));
+        assert!(!state.is_round_gt(second));
+    }
 }

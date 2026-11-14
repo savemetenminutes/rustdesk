@@ -749,9 +749,10 @@ pub fn session_peer_option(session_id: SessionID, name: String, value: String) {
     }
 }
 
-/// Writes a window-placement trace line from Flutter to the RustDesk log.
+/// Writes a window-placement trace line from Flutter to the RustDesk log at `info`, so that the release log filter
+/// (`debug`, `hbb_common::init_log()`) keeps it.
 pub fn main_display_windows_log(message: String) -> SyncReturn<()> {
-    log::trace!("{}", message);
+    log::info!("{}", message);
     SyncReturn(())
 }
 

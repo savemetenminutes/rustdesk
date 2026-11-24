@@ -4017,7 +4017,18 @@ class CursorModel with ChangeNotifier {
   void _markUnavailable(int generation, String id) {
     if (generation != _generation || id != _id) return;
     _unavailable = id;
+    _cursorLog('unavailable id=$id (the core keeps no shape for it): default cursor');
     _updateCurData();
+  }
+
+  // The id `_cursorLog()` last reported as shown without a shape; one line per id, not per frame.
+  String? _loggedNoShape;
+
+  /// Writes a `[cursor]` line to the RustDesk log (`main_display_windows_log`, level info).
+  void _cursorLog(String message) {
+    final ffi = parent.target;
+    bind.mainDisplayWindowsLog(
+        message: '[cursor] window=${stateGlobal.windowId} peer=${ffi?.id} $message');
   }
 
   bool _updateCurData() {
@@ -4026,6 +4037,16 @@ class CursorModel with ChangeNotifier {
     // A shape not decoded yet leaves the one shown before in place until it is; one the core
     // cannot give leaves none, so the default cursor shows, as for a shape never sent.
     if (cache != null || _unavailable == _id) _cache = cache;
+    if (_cache == null) {
+      if (_loggedNoShape != _id) {
+        _loggedNoShape = _id;
+        _cursorLog('no shape for id=$_id (decoded ${_cacheMap.length}, '
+            'unavailable=${_unavailable == _id}): default cursor');
+      }
+    } else if (_loggedNoShape != null) {
+      _cursorLog('shape for id=$_id shown after the default cursor');
+      _loggedNoShape = null;
+    }
     if (previous != null && !identical(previous, _cache)) {
       _switchedAway(previous);
     }

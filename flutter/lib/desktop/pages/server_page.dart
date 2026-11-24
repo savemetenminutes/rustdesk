@@ -1242,9 +1242,10 @@ void checkClickTime(int id, Function() callback) async {
   });
 }
 
+/// The connection manager window takes the remote controller's input like any other window: no `buildRemoteBlock()`
+/// mask and no `_buildKeyEventBlock()` focus exclusion.
 bool allowRemoteCMModification() {
-  return option2bool(kOptionAllowRemoteCmModification,
-      bind.mainGetLocalOption(key: kOptionAllowRemoteCmModification));
+  return true;
 }
 
 class _FileTransferLogPage extends StatefulWidget {

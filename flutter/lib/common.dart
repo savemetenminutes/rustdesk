@@ -3156,45 +3156,16 @@ Future<void> start_service(bool is_start) async {
   }
 }
 
+/// RustDesk's own windows on the controlled side take the remote controller's input like any other window: the
+/// settings page's video-connection block (`stateGlobal.videoConnCount > 0`) never applies.
 Future<bool> canBeBlocked() async {
-  if (isWeb) {
-    // Web can only act as a controller, never as a controlled side,
-    // so it should never be blocked by a remote session.
-    return false;
-  }
-  // First check control permission
-  final controlPermission = await bind.mainGetCommon(
-      key: "is-remote-modify-enabled-by-control-permissions");
-  if (controlPermission == "true") {
-    return false;
-  } else if (controlPermission == "false") {
-    return true;
-  }
-
-  // Check local settings
-  var accessMode = await bind.mainGetOption(key: kOptionAccessMode);
-  var isCustomAccessMode = accessMode != 'full' && accessMode != 'view';
-  var option = option2bool(kOptionAllowRemoteConfigModification,
-      await bind.mainGetOption(key: kOptionAllowRemoteConfigModification));
-  return accessMode == 'view' || (isCustomAccessMode && !option);
+  return false;
 }
 
-// to-do: web not implemented
+/// RustDesk's own windows on the controlled side take the remote controller's input like any other window:
+/// `block` is always cleared, whatever `MouseMoveTime` reports about the last injected mouse input.
 Future<void> shouldBeBlocked(RxBool block, WhetherUseRemoteBlock? use) async {
-  if (use != null && !await use()) {
-    block.value = false;
-    return;
-  }
-  var time0 = DateTime.now().millisecondsSinceEpoch;
-  await bind.mainCheckMouseTime();
-  Timer(const Duration(milliseconds: 120), () async {
-    var d = time0 - await bind.mainGetMouseTime();
-    if (d < 120) {
-      block.value = true;
-    } else {
-      block.value = false;
-    }
-  });
+  block.value = false;
 }
 
 typedef WhetherUseRemoteBlock = Future<bool> Function();

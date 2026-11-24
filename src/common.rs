@@ -2507,6 +2507,7 @@ fn apply_fork_default_settings() {
         (keys::OPTION_USE_ALL_MY_DISPLAYS_FOR_THE_REMOTE_SESSION, "Y"),
         (keys::OPTION_DISPLAYS_AS_INDIVIDUAL_WINDOWS, "Y"),
         (keys::OPTION_ENABLE_FILE_COPY_PASTE, "Y"),
+        (keys::OPTION_DISABLE_AUDIO, "Y"),
     ] {
         display.insert(k.to_owned(), v.to_owned());
     }

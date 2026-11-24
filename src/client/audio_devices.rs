@@ -250,15 +250,19 @@ pub fn get_input_devices() -> Vec<String> {
     vec![]
 }
 
-/// A session starts muted unless the peer option `OPTION_AUDIO_MUTE_SAVED` holds "N": sets `disable_audio` of the
-/// peer's config (stored, since the mute toggle reads the stored config). The toggle then mutes or unmutes the running
-/// session only; the Audio dialog's Save / Clear write the option.
+/// "Start sessions muted": the peer option `OPTION_AUDIO_MUTE_SAVED` ("Y" muted, "N" unmuted) wins; absent or ""
+/// follows the new-session default `disable_audio` (`UserDefaultConfig`, fork default "Y"). Sets `disable_audio` of
+/// the peer's config (stored, since the mute toggle reads the stored config). The toggle then mutes or unmutes the
+/// running session only; the Audio dialog's Save / Clear and the settings row write the option.
 #[cfg(target_os = "windows")]
 pub fn apply_mute_at_start(config: &mut hbb_common::config::PeerConfig, id: &str) {
-    let muted = config
-        .options
-        .get(OPTION_AUDIO_MUTE_SAVED)
-        .map_or(true, |v| v != "N");
+    let muted = match config.options.get(OPTION_AUDIO_MUTE_SAVED).map(|v| v.as_str()) {
+        Some("Y") => true,
+        Some("N") => false,
+        _ => {
+            hbb_common::config::UserDefaultConfig::load().get(base::config::keys::OPTION_DISABLE_AUDIO) == "Y"
+        }
+    };
     if config.disable_audio.v != muted {
         config.disable_audio.v = muted;
         config.store(id);

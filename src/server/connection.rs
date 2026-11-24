@@ -412,6 +412,12 @@ pub struct Connection {
     /// The controller's microphone stream is on (`Misc.host_microphone`): its audio goes only to the virtual microphone
     /// (`host_microphone`), never to the voice-call playback; without a virtual microphone it is dropped.
     host_microphone_active: bool,
+    /// The controller's last `AudioFormat` while `host_microphone_active`; `attach_host_microphone()` opens the
+    /// virtual microphone playback with it when the virtual microphone appears after the stream started.
+    host_microphone_format: Option<AudioFormat>,
+    /// Set by the `Misc.install_virtual_microphone` thread when `virtual_microphone::install()` succeeds; the next
+    /// `AudioFrame` of an unattached `host_microphone_active` stream calls `attach_host_microphone()`.
+    host_microphone_installed: Arc<AtomicBool>,
     // audio by the remote peer/client
     tx_input: std_mpsc::Sender<MessageInput>,
     // handle input messages
@@ -639,6 +645,8 @@ impl Connection {
             audio_sender: None,
             host_microphone: None,
             host_microphone_active: false,
+            host_microphone_format: None,
+            host_microphone_installed: Arc::new(AtomicBool::new(false)),
             voice_call_request_timestamp: None,
             voice_calling: false,
             options_in_login: None,
@@ -4002,6 +4010,7 @@ impl Connection {
                         if self.host_microphone_active {
                             // The controller's microphone plays into the virtual microphone, whatever the mute.
                             drop(std::mem::replace(&mut self.audio_sender, None));
+                            self.host_microphone_format = Some(format.clone());
                             if let Some(key) = self.host_microphone.clone() {
                                 let sender = crate::client::start_audio_thread_for(key);
                                 allow_err!(sender.send(MediaData::AudioFormat(format)));
@@ -4139,13 +4148,17 @@ impl Connection {
                     Some(misc::Union::InstallVirtualMicrophone(driver)) => {
                         if self.audio && self.keyboard {
                             let mut inner = self.inner.clone();
+                            let installed = self.host_microphone_installed.clone();
                             let send_inputs = move |inner: &mut ConnInner, status: String| {
                                 inner.send(Arc::new(audio_inputs_message(status)));
                             };
                             send_inputs(&mut inner, "installing".to_owned());
                             std::thread::spawn(move || {
                                 let status = match super::virtual_microphone::install(&driver) {
-                                    Ok(()) => "installed".to_owned(),
+                                    Ok(()) => {
+                                        installed.store(true, Ordering::Release);
+                                        "installed".to_owned()
+                                    }
                                     Err(e) => {
                                         log::error!("Virtual microphone install failed: {e}");
                                         format!("failed: {e}")
@@ -4192,6 +4205,12 @@ impl Connection {
                 },
                 Some(message::Union::AudioFrame(frame)) => {
                     if self.host_microphone_active {
+                        #[cfg(windows)]
+                        if self.audio_sender.is_none()
+                            && self.host_microphone_installed.swap(false, Ordering::AcqRel)
+                        {
+                            self.attach_host_microphone();
+                        }
                         if self.audio {
                             if let Some(sender) = &self.audio_sender {
                                 allow_err!(sender.send(MediaData::AudioFrame(Box::new(frame))));
@@ -5418,23 +5437,36 @@ impl Connection {
     /// the virtual microphone's playback endpoint (`virtual_microphone`) when one is installed; without one the stream
     /// is dropped. Hearing it on this side's speakers is the virtual microphone's "Listen to this device".
     fn set_host_microphone(&mut self, active: bool) {
-        let id = self.inner.id();
         if self.host_microphone_active {
             drop(self.audio_sender.take());
         }
         self.host_microphone = None;
+        self.host_microphone_format = None;
         self.host_microphone_active = active;
         if !active {
             return;
         }
         #[cfg(windows)]
-        match super::virtual_microphone::detect() {
-            Some(pair) => {
-                let key = format!("host-microphone-{id}");
-                crate::client::audio_devices::set_output_selection(&key, &pair.playback_name);
-                self.host_microphone = Some(key);
-            }
-            None => log::warn!("No virtual microphone (VB-CABLE, Virtual Audio Driver) is installed"),
+        self.attach_host_microphone();
+    }
+
+    /// Selects the virtual microphone's playback endpoint for the controller's microphone stream
+    /// (`host_microphone`); with a stored `host_microphone_format` (the stream started before the virtual microphone
+    /// was installed) it also opens the playback and makes it `audio_sender`.
+    #[cfg(windows)]
+    fn attach_host_microphone(&mut self) {
+        let Some(pair) = super::virtual_microphone::detect() else {
+            log::warn!("No virtual microphone (VB-CABLE, Virtual Audio Driver) is installed");
+            return;
+        };
+        let key = format!("host-microphone-{}", self.inner.id());
+        crate::client::audio_devices::set_output_selection(&key, &pair.playback_name);
+        log::info!("Controller microphone plays into \"{}\"", pair.playback_name);
+        self.host_microphone = Some(key.clone());
+        if let Some(format) = self.host_microphone_format.clone() {
+            let sender = crate::client::start_audio_thread_for(key);
+            allow_err!(sender.send(MediaData::AudioFormat(format)));
+            self.audio_sender = Some(sender);
         }
     }
 

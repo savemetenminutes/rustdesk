@@ -756,6 +756,32 @@ pub fn main_display_windows_log(message: String) -> SyncReturn<()> {
     SyncReturn(())
 }
 
+/// `"left,top,right,bottom"` (`GetWindowRect`, screen pixels) of the top-level window under screen point `(x, y)`,
+/// i.e. the window the user sees there; "" when there is none or off Windows. `WindowFromPoint` ignores the mouse
+/// capture a drag holds, so it answers for the window under the cursor, not the capturing one.
+pub fn main_top_window_rect_at(x: i32, y: i32) -> SyncReturn<String> {
+    #[cfg(windows)]
+    unsafe {
+        use winapi::shared::windef::{POINT, RECT};
+        use winapi::um::winuser::{GetAncestor, GetWindowRect, WindowFromPoint, GA_ROOT};
+        let hwnd = WindowFromPoint(POINT { x, y });
+        if hwnd.is_null() {
+            return SyncReturn(String::new());
+        }
+        let root = GetAncestor(hwnd, GA_ROOT);
+        let mut r: RECT = std::mem::zeroed();
+        if root.is_null() || GetWindowRect(root, &mut r) == 0 {
+            return SyncReturn(String::new());
+        }
+        return SyncReturn(format!("{},{},{},{}", r.left, r.top, r.right, r.bottom));
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (x, y);
+        SyncReturn(String::new())
+    }
+}
+
 /// JSON array of this side's output device names.
 pub fn main_get_audio_output_devices() -> SyncReturn<String> {
     SyncReturn(

@@ -110,11 +110,14 @@ class CursorCoords {
 
 class RemoteWindowCoords {
   RemoteWindowCoords(
-      this.windowRect, this.canvas, this.cursor, this.remoteRect);
+      this.windowRect, this.canvas, this.cursor, this.remoteRect,
+      {this.peerId = ''});
   Rect windowRect;
   CanvasCoords canvas;
   CursorCoords cursor;
   Rect remoteRect;
+  /// Peer the window's session is connected to; a drag maps only through windows of its own peer.
+  String peerId;
   Offset relativeOffset = Offset.zero;
 
   Map<String, dynamic> toJson() {
@@ -123,6 +126,7 @@ class RemoteWindowCoords {
       'cursor': cursor.toJson(),
       'windowRect': rectToJson(windowRect),
       'remoteRect': rectToJson(remoteRect),
+      'peerId': peerId,
     };
   }
 
@@ -148,7 +152,8 @@ class RemoteWindowCoords {
       : windowRect = rectFromJson(json['windowRect']),
         canvas = CanvasCoords.fromJson(json['canvas']),
         cursor = CursorCoords.fromJson(json['cursor']),
-        remoteRect = rectFromJson(json['remoteRect']);
+        remoteRect = rectFromJson(json['remoteRect']),
+        peerId = (json['peerId'] ?? '') as String;
 }
 
 extension ToString on MouseButtons {
@@ -2252,23 +2257,27 @@ class InputModel {
         CanvasCoords.fromCanvasModel(parent.target!.canvasModel);
     Rect? rect = ffiModel.rect;
 
-    if (isMove) {
-      if (_remoteWindowCoords.isNotEmpty &&
-          _windowRect != null &&
-          !_isInCurrentWindow(x, y)) {
-        final coords =
-            findRemoteCoords(x, y, _remoteWindowCoords, devicePixelRatio);
-        if (coords != null) {
-          isMove = false;
-          canvas = coords.canvas;
-          rect = coords.remoteRect;
-          x -= isWindows
-              ? coords.relativeOffset.dx / devicePixelRatio
-              : coords.relativeOffset.dx;
-          y -= isWindows
-              ? coords.relativeOffset.dy / devicePixelRatio
-              : coords.relativeOffset.dy;
-        }
+    // A drag holds the mouse in the window it started in. Outside that window, a move maps through the display
+    // window of the same peer that the user sees under the pointer (`findRemoteCoords()`), so the remote cursor
+    // follows the host cursor across windows. The release carries no position (`processEventToPeer()` sends
+    // x/y "0" for button events): a dragged remote window drops where the last move put the remote cursor.
+    if (isMove &&
+        _remoteWindowCoords.isNotEmpty &&
+        _windowRect != null &&
+        !_isInCurrentWindow(x, y)) {
+      final coords = findRemoteCoords(
+          x, y, _remoteWindowCoords, devicePixelRatio,
+          peerId: parent.target?.id, currentFrame: _windowRect);
+      if (coords != null) {
+        isMove = false;
+        canvas = coords.canvas;
+        rect = coords.remoteRect;
+        x -= isWindows
+            ? coords.relativeOffset.dx / devicePixelRatio
+            : coords.relativeOffset.dx;
+        y -= isWindows
+            ? coords.relativeOffset.dy / devicePixelRatio
+            : coords.relativeOffset.dy;
       }
     }
 
@@ -2309,21 +2318,50 @@ class InputModel {
     return x >= 0 && y >= 0 && x <= w && y <= h;
   }
 
+  /// The display window the user sees at pointer position `(x, y)` (relative to the current window; logical pixels on
+  /// Windows), among `remoteWindowCoords`, or null.
+  ///
+  /// Candidates: windows of `peerId` whose frame contains the point. On Windows, with `currentFrame` (this window's
+  /// `GetWindowRect`), the screen point goes to `mainTopWindowRectAt()`: the candidate whose frame is the top-level
+  /// window shown there wins, and a point covered by any other window maps to none. Elsewhere the first candidate.
   static RemoteWindowCoords? findRemoteCoords(double x, double y,
-      List<RemoteWindowCoords> remoteWindowCoords, double devicePixelRatio) {
+      List<RemoteWindowCoords> remoteWindowCoords, double devicePixelRatio,
+      {String? peerId, Rect? currentFrame}) {
     if (isWindows) {
       x *= devicePixelRatio;
       y *= devicePixelRatio;
     }
-    for (final c in remoteWindowCoords) {
-      if (x >= c.relativeOffset.dx &&
-          y >= c.relativeOffset.dy &&
-          x <= c.relativeOffset.dx + c.windowRect.width &&
-          y <= c.relativeOffset.dy + c.windowRect.height) {
-        return c;
+    final candidates = remoteWindowCoords
+        .where((c) =>
+            (peerId == null || c.peerId.isEmpty || c.peerId == peerId) &&
+            x >= c.relativeOffset.dx &&
+            y >= c.relativeOffset.dy &&
+            x <= c.relativeOffset.dx + c.windowRect.width &&
+            y <= c.relativeOffset.dy + c.windowRect.height)
+        .toList();
+    if (candidates.isEmpty) return null;
+    if (isWindows && currentFrame != null) {
+      final top = bind
+          .mainTopWindowRectAt(
+              x: (currentFrame.left + x).round(),
+              y: (currentFrame.top + y).round())
+          .split(',')
+          .map(double.tryParse)
+          .toList();
+      if (top.length == 4 && top.every((v) => v != null)) {
+        bool near(double a, double b) => (a - b).abs() <= 2;
+        for (final c in candidates) {
+          if (near(c.windowRect.left, top[0]!) &&
+              near(c.windowRect.top, top[1]!) &&
+              near(c.windowRect.right, top[2]!) &&
+              near(c.windowRect.bottom, top[3]!)) {
+            return c;
+          }
+        }
+        return null;
       }
     }
-    return null;
+    return candidates.first;
   }
 
   Point? _handlePointerDevicePos(

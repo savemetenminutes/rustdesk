@@ -575,7 +575,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
               frame,
               CanvasCoords.fromCanvasModel(ffi.canvasModel),
               CursorCoords.fromCursorModel(ffi.cursorModel),
-              displayRect);
+              displayRect,
+              peerId: ffi.id);
           returnValue = jsonEncode(coords.toJson());
         }
       }

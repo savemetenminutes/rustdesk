@@ -1571,6 +1571,8 @@ class RustdeskImpl {
   }
 
   void mainDisplayWindowsLog({required String message, dynamic hint}) {}
+  String mainTopWindowRectAt({required int x, required int y, dynamic hint}) =>
+      '';
   Future<String> sessionSetKeyboardExcludeShortcuts(
       {required UuidValue sessionId, required String value, dynamic hint}) {
     return Future.value('');

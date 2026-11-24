@@ -3709,7 +3709,8 @@ class CursorModel with ChangeNotifier {
         _windowRect != null &&
         !_isInCurrentWindow(localPosition.dx, localPosition.dy)) {
       final coords = InputModel.findRemoteCoords(localPosition.dx,
-          localPosition.dy, _remoteWindowCoords, devicePixelRatio);
+          localPosition.dy, _remoteWindowCoords, devicePixelRatio,
+          peerId: parent.target?.id, currentFrame: _windowRect);
       if (coords != null) {
         double x2 =
             (localPosition.dx - coords.relativeOffset.dx / devicePixelRatio) /

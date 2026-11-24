@@ -2068,6 +2068,27 @@ class _DisplayMenuState extends State<_DisplayMenu> {
                     child: Text(translate('Sync clipboard between sessions')),
                     ffi: ffi),
               );
+          // "Sync clipboard with nested sessions" (local option `allow-sync-clipboard-nested-sessions`, also in
+          // Settings → General): a clipboard this PC's server side wrote is sent to this session's peer, and one this
+          // session wrote is sent to the controllers of this PC (`ClipboardContext::get_formats_filter()`).
+          Widget nestedClipboard(bool clipboardDisabled) => Padding(
+                padding: const EdgeInsets.only(left: 24),
+                child: CkbMenuButton(
+                    value: bind.mainGetLocalOption(
+                            key: kOptionAllowSyncClipboardNestedSessions) ==
+                        'Y',
+                    onChanged: clipboardDisabled ||
+                            isOptionFixed(kOptionAllowSyncClipboardNestedSessions) == true
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            bind.mainSetLocalOption(
+                                key: kOptionAllowSyncClipboardNestedSessions,
+                                value: value ? 'Y' : 'N');
+                          },
+                    child: Text(translate('Sync clipboard with nested sessions')),
+                    ffi: ffi),
+              );
           return Column(children: [
             for (final e in v) ...[
               CkbMenuButton(
@@ -2075,8 +2096,10 @@ class _DisplayMenuState extends State<_DisplayMenu> {
                   onChanged: e.onChanged,
                   child: e.child,
                   ffi: ffi),
-              if (e.actionId == kShortcutActionToggleDisableClipboard)
+              if (e.actionId == kShortcutActionToggleDisableClipboard) ...[
                 syncClipboard(e.value),
+                nestedClipboard(e.value),
+              ],
             ],
           ]);
         });

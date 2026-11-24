@@ -25,6 +25,20 @@ pub fn is_sync_clipboard_between_sessions_enabled() -> bool {
     )
 }
 
+/// Local option: a clipboard written by the other `ClipboardSide` of this RustDesk (a nested session: this PC
+/// controls a PC while being controlled) is forwarded instead of skipped. Read with
+/// `LocalConfig::get_option_from_file()`, so the `--cm` process that reads the clipboard for the Windows service sees
+/// a change made in the main window.
+pub const OPTION_ALLOW_SYNC_CLIPBOARD_NESTED_SESSIONS: &str = "allow-sync-clipboard-nested-sessions";
+
+#[cfg(not(target_os = "android"))]
+pub fn is_sync_clipboard_nested_sessions_enabled() -> bool {
+    hbb_common::config::option2bool(
+        OPTION_ALLOW_SYNC_CLIPBOARD_NESTED_SESSIONS,
+        &hbb_common::config::LocalConfig::get_option_from_file(OPTION_ALLOW_SYNC_CLIPBOARD_NESTED_SESSIONS),
+    )
+}
+
 // This format is used to store the flag in the clipboard.
 const RUSTDESK_CLIPBOARD_OWNER_FORMAT: &'static str = "dyn.com.rustdesk.owner";
 
@@ -39,6 +53,34 @@ lazy_static::lazy_static! {
     // The clipboard content is owned by the server and passed to the clients when requested.
     // Plain text is the only exception, it does not require the server to be present.
     static ref CLIPBOARD_CTX: Arc<Mutex<Option<ClipboardContext>>> = Arc::new(Mutex::new(None));
+    /// `clipboard_hash()` of the last non-empty content `ClipboardContext::get_formats_filter()` returned, per
+    /// `ClipboardSide` (`[Host, Client]`). A nested-session forward of the same content is skipped, which ends the
+    /// round trip of a clipboard between two PCs that control each other.
+    static ref LAST_READ_HASH: Mutex<[Option<u64>; 2]> = Mutex::new([None, None]);
+}
+
+/// Hash of clipboard content `data` (format and payload of each entry, in order).
+#[cfg(not(target_os = "android"))]
+fn clipboard_hash(data: &[ClipboardData]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for c in data {
+        match c {
+            ClipboardData::Text(s) => (1u8, s).hash(&mut h),
+            ClipboardData::Html(s) => (2u8, s).hash(&mut h),
+            ClipboardData::Rtf(s) => (3u8, s).hash(&mut h),
+            ClipboardData::Image(arboard::ImageData::Rgba(i)) => {
+                (4u8, i.width, i.height, &i.bytes[..]).hash(&mut h)
+            }
+            ClipboardData::Image(arboard::ImageData::Png(b)) => (5u8, &b[..]).hash(&mut h),
+            ClipboardData::Image(arboard::ImageData::Svg(s)) => (6u8, s).hash(&mut h),
+            ClipboardData::Special((n, b)) => (7u8, n, b).hash(&mut h),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            ClipboardData::FileUrl(u) => (8u8, u).hash(&mut h),
+            _ => 0u8.hash(&mut h),
+        }
+    }
+    h.finish()
 }
 
 #[cfg(not(target_os = "android"))]
@@ -407,16 +449,22 @@ impl ClipboardContext {
         if data.is_empty() {
             return Ok(data);
         }
+        // A clipboard RustDesk wrote carries `RUSTDESK_CLIPBOARD_OWNER_FORMAT`. Written by `side` itself: skipped.
+        // Written by the other side: skipped, unless `OPTION_ALLOW_SYNC_CLIPBOARD_NESTED_SESSIONS` forwards it.
+        let mut nested_forward = false;
         if !force {
             for c in data.iter() {
                 if let ClipboardData::Special((s, d)) = c {
                     if s == RUSTDESK_CLIPBOARD_OWNER_FORMAT && side.is_owner(d) {
-                        return Ok(vec![]);
+                        if side.is_own_marker(d) || !is_sync_clipboard_nested_sessions_enabled() {
+                            return Ok(vec![]);
+                        }
+                        nested_forward = true;
                     }
                 }
             }
         }
-        Ok(data
+        let data: Vec<ClipboardData> = data
             .into_iter()
             .filter(|c| match c {
                 ClipboardData::Special((s, _)) => s != RUSTDESK_CLIPBOARD_OWNER_FORMAT,
@@ -424,7 +472,21 @@ impl ClipboardContext {
                 ClipboardData::Text(text) => !text.is_empty(),
                 _ => true,
             })
-            .collect())
+            .collect();
+        if !data.is_empty() {
+            let hash = clipboard_hash(&data);
+            let mut last = LAST_READ_HASH.lock().unwrap();
+            let slot = &mut last[side.index()];
+            if nested_forward && *slot == Some(hash) {
+                log::debug!("Skip nested-session clipboard forward on {side}: same content as the last read");
+                return Ok(vec![]);
+            }
+            *slot = Some(hash);
+            if nested_forward {
+                log::info!("Forwarding the clipboard of the other side to the peer of {side} (nested session)");
+            }
+        }
+        Ok(data)
     }
 
     #[cfg(feature = "unix-file-copy-paste")]
@@ -616,6 +678,19 @@ impl ClipboardSide {
             return false;
         }
         data[0] & 0b11 != 0
+    }
+
+    /// The owner marker `data` was written by this side (`get_owner_data()`).
+    fn is_own_marker(&self, data: &[u8]) -> bool {
+        !data.is_empty() && data[0] & self.get_owner_data()[0] != 0
+    }
+
+    /// Index of this side in `LAST_READ_HASH`.
+    fn index(&self) -> usize {
+        match self {
+            ClipboardSide::Host => 0,
+            ClipboardSide::Client => 1,
+        }
     }
 }
 

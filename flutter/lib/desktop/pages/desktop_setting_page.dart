@@ -644,6 +644,16 @@ class _GeneralState extends State<_General> {
             isServer: false,
           ),
         ),
+      if (!isWeb)
+        Tooltip(
+          message: translate('sync-clipboard-nested-sessions-tip'),
+          child: _OptionCheckBox(
+            context,
+            'Sync clipboard with nested sessions',
+            kOptionAllowSyncClipboardNestedSessions,
+            isServer: false,
+          ),
+        ),
     ];
 
     // Add client-side wakelock option for desktop platforms

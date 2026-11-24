@@ -829,5 +829,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("keyboard-exclude-tip", ""),
         ("Press the shortcut to keep on this PC", ""),
         ("Add a shortcut to keep on this PC", ""),
+        ("Sync clipboard with nested sessions", ""),
+        ("sync-clipboard-nested-sessions-tip", ""),
     ].iter().cloned().collect();
 }

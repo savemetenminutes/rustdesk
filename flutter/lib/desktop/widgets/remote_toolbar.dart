@@ -28,6 +28,7 @@ import './audio_devices_dialog.dart';
 import 'package:flutter_hbb/utils/display_windows.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
+import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 
 enum _ToolbarEdge { top, right, bottom, left }
 
@@ -839,12 +840,23 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
     toolbarItems
         .add(_ControlMenu(id: widget.id, ffi: widget.ffi, state: widget.state));
+    // Every settings category of the settings screen has a dropdown here, in the screen's order. Display is
+    // `_DisplayMenu`: this session's display settings, then the Display category itself.
+    final settingsTabs = DesktopSettingPage.tabKeys;
+    final displayIndex = settingsTabs.indexOf(SettingsTabKey.display);
+    for (final tab in settingsTabs) {
+      if (tab == SettingsTabKey.display) break;
+      toolbarItems.add(_SettingsCategoryMenu(tab: tab, ffi: widget.ffi));
+    }
     toolbarItems.add(_DisplayMenu(
       id: widget.id,
       ffi: widget.ffi,
       state: widget.state,
       setFullscreen: _setFullscreen,
     ));
+    for (final tab in settingsTabs.skip(displayIndex < 0 ? settingsTabs.length : displayIndex + 1)) {
+      toolbarItems.add(_SettingsCategoryMenu(tab: tab, ffi: widget.ffi));
+    }
     // Do not show keyboard for camera connection type.
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
@@ -1788,6 +1800,17 @@ class _DisplayMenuState extends State<_DisplayMenu> {
         if (ffi.connType == ConnType.defaultConn) cursorToggles(),
         Divider(),
         toggles(),
+        // The Display category of the settings screen (defaults of every new session).
+        if (DesktopSettingPage.tabKeys.contains(SettingsTabKey.display)) ...[
+          Divider(),
+          _SubmenuButton(
+            ffi: widget.ffi,
+            child: Text(translate('Display Settings')),
+            menuChildren: [
+              _settingsCategoryPanel(context, SettingsTabKey.display)
+            ],
+          ),
+        ],
       ];
       // privacy mode
       final privacyModeState = PrivacyModeState.find(id);
@@ -1842,8 +1865,8 @@ class _DisplayMenuState extends State<_DisplayMenu> {
           return Column(children: [
             ...v.map((e) {
               final isCustom = e.value == kRemoteViewStyleCustom;
-              final child =
-                  isCustom ? Text(translate('Scale custom')) : e.child;
+              final child = _savedForPeer(
+                  isCustom ? Text(translate('Scale custom')) : e.child);
               // Whether the current selection is already custom
               final bool isGroupCustomSelected =
                   e.groupValue == kRemoteViewStyleCustom;
@@ -1931,7 +1954,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
 
       return Obx(() => Column(children: [
             RdoMenuButton<String>(
-              child: Text(translate('ScrollAuto')),
+              child: _savedForPeer(Text(translate('ScrollAuto'))),
               value: kRemoteScrollStyleAuto,
               groupValue: groupValue,
               onChanged: widget.ffi.canvasModel.imageOverflow.value
@@ -1941,7 +1964,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
               ffi: widget.ffi,
             ),
             RdoMenuButton<String>(
-              child: Text(translate('Scrollbar')),
+              child: _savedForPeer(Text(translate('Scrollbar'))),
               value: kRemoteScrollStyleBar,
               groupValue: groupValue,
               onChanged: widget.ffi.canvasModel.imageOverflow.value
@@ -1952,7 +1975,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
             ),
             if (!isWeb) ...[
               RdoMenuButton<String>(
-                child: Text(translate('ScrollEdge')),
+                child: _savedForPeer(Text(translate('ScrollEdge'))),
                 value: kRemoteScrollStyleEdge,
                 groupValue: groupValue,
                 closeOnActivate: false,
@@ -1981,7 +2004,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
           final v = data as List<TRadioMenu<String>>;
           return _SubmenuButton(
             ffi: widget.ffi,
-            child: Text(translate('Image Quality')),
+            child: _savedForPeer(Text(translate('Image Quality'))),
             menuChildren: v
                 .map((e) => RdoMenuButton<String>(
                     value: e.value,
@@ -2003,7 +2026,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
 
           return _SubmenuButton(
               ffi: widget.ffi,
-              child: Text(translate('Codec')),
+              child: _savedForPeer(Text(translate('Codec'))),
               menuChildren: v
                   .map((e) => RdoMenuButton(
                       value: e.value,
@@ -2023,11 +2046,12 @@ class _DisplayMenuState extends State<_DisplayMenu> {
           if (v.isEmpty) return Offstage();
           return Column(children: [
             Divider(),
+            // Every cursor toggle is a `toggle_option()` of the peer config.
             ...v
                 .map((e) => CkbMenuButton(
                     value: e.value,
                     onChanged: e.onChanged,
-                    child: e.child,
+                    child: _savedForPeer(e.child),
                     ffi: ffi))
                 .toList(),
           ]);
@@ -2091,10 +2115,14 @@ class _DisplayMenuState extends State<_DisplayMenu> {
               );
           return Column(children: [
             for (final e in v) ...[
+              // Peer config toggles, displays as individual windows and use all my displays are saved for the
+              // peer; Mute is not (`audio-mute-saved`, the Audio dialog's Save).
               CkbMenuButton(
                   value: e.value,
                   onChanged: e.onChanged,
-                  child: e.child,
+                  child: e.actionId == kShortcutActionToggleMute
+                      ? e.child
+                      : _savedForPeer(e.child),
                   ffi: ffi),
               if (e.actionId == kShortcutActionToggleDisableClipboard) ...[
                 syncClipboard(e.value),
@@ -3862,6 +3890,54 @@ class EdgeThicknessControl extends StatelessWidget {
 
     return slider;
   }
+}
+
+/// A settings category of the settings screen as a toolbar dropdown: the panel is `settingsTabPage(tab)`, the page
+/// the settings screen shows for that category, with the category's icon (`settingsTabIcons()`).
+class _SettingsCategoryMenu extends StatelessWidget {
+  final SettingsTabKey tab;
+  final FFI ffi;
+  const _SettingsCategoryMenu({Key? key, required this.tab, required this.ffi})
+      : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final (_, glyph) = settingsTabIcons(tab);
+    return _IconSubmenuButton(
+      icon: SizedBox(
+        width: _ToolbarTheme.buttonSize,
+        height: _ToolbarTheme.buttonSize,
+        child: Center(
+          child: Icon(glyph,
+              color: Colors.white, size: _ToolbarTheme.buttonSize * 0.625),
+        ),
+      ),
+      tooltip: '${translate(settingsTabLabel(tab))} ${translate('Settings')}',
+      ffi: ffi,
+      color: _ToolbarTheme.blueColor,
+      hoverColor: _ToolbarTheme.hoverBlueColor,
+      menuChildrenGetter: (_) => [_settingsCategoryPanel(context, tab)],
+    );
+  }
+}
+
+/// `settingsTabPage(tab)` in a box of the settings screen's content width, as tall as the window allows.
+Widget _settingsCategoryPanel(BuildContext context, SettingsTabKey tab) {
+  final height = (MediaQuery.of(context).size.height * 0.8).clamp(240.0, 760.0);
+  return SizedBox(width: 560, height: height, child: settingsTabPage(tab));
+}
+
+/// `child` of a setting this session stores in the peer's config, so the next connection to the peer starts with
+/// it: followed by a floppy glyph.
+Widget _savedForPeer(Widget child) {
+  return Row(mainAxisSize: MainAxisSize.min, children: [
+    Flexible(child: child),
+    const SizedBox(width: 6),
+    Tooltip(
+      message: translate('Saved for this remote PC'),
+      child: const Icon(Icons.save_outlined, size: 14),
+    ),
+  ]);
 }
 
 /// Speaker button: output device of this PC and capture device of the remote PC (`audioDevicesDialog()`).

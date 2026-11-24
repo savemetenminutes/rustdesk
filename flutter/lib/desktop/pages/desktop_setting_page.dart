@@ -56,9 +56,78 @@ enum SettingsTabKey {
   safety,
   network,
   display,
+  toolbar,
   account,
   printer,
   about,
+}
+
+/// Label of settings category `key`, shared by the settings page tabs and the remote toolbar's category buttons.
+String settingsTabLabel(SettingsTabKey key) {
+  switch (key) {
+    case SettingsTabKey.general:
+      return 'General';
+    case SettingsTabKey.safety:
+      return 'Security';
+    case SettingsTabKey.network:
+      return 'Network';
+    case SettingsTabKey.display:
+      return 'Display';
+    case SettingsTabKey.toolbar:
+      return 'Toolbar';
+    case SettingsTabKey.account:
+      return 'Account';
+    case SettingsTabKey.printer:
+      return 'Printer';
+    case SettingsTabKey.about:
+      return 'About';
+  }
+}
+
+/// `(unselected, selected)` icons of settings category `key`, shared by the settings page tabs and the remote
+/// toolbar's category buttons.
+(IconData, IconData) settingsTabIcons(SettingsTabKey key) {
+  switch (key) {
+    case SettingsTabKey.general:
+      return (Icons.settings_outlined, Icons.settings);
+    case SettingsTabKey.safety:
+      return (Icons.enhanced_encryption_outlined, Icons.enhanced_encryption);
+    case SettingsTabKey.network:
+      return (Icons.link_outlined, Icons.link);
+    case SettingsTabKey.display:
+      return (Icons.desktop_windows_outlined, Icons.desktop_windows);
+    case SettingsTabKey.toolbar:
+      return (Icons.web_asset_outlined, Icons.web_asset);
+    case SettingsTabKey.account:
+      return (Icons.person_outline, Icons.person);
+    case SettingsTabKey.printer:
+      return (Icons.print_outlined, Icons.print);
+    case SettingsTabKey.about:
+      return (Icons.info_outline, Icons.info);
+  }
+}
+
+/// Page of settings category `key`: the settings page shows it as a tab, the remote toolbar in the category's
+/// dropdown, so both carry the same settings.
+Widget settingsTabPage(SettingsTabKey key) {
+  switch (key) {
+    case SettingsTabKey.general:
+      return const _General();
+    case SettingsTabKey.safety:
+      return const _Safety();
+    case SettingsTabKey.network:
+      return const _Network();
+    case SettingsTabKey.display:
+      return const _Display();
+    case SettingsTabKey.toolbar:
+      return const _Toolbar();
+    case SettingsTabKey.account:
+      return const _Account();
+    case SettingsTabKey.printer:
+      return const _Printer();
+    case SettingsTabKey.about:
+      return const _About();
+  }
 }
 
 class DesktopSettingPage extends StatefulWidget {
@@ -75,6 +144,7 @@ class DesktopSettingPage extends StatefulWidget {
         bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')
       SettingsTabKey.network,
     if (!bind.isIncomingOnly()) SettingsTabKey.display,
+    if (!bind.isIncomingOnly()) SettingsTabKey.toolbar,
     if (!bind.isDisableAccount()) SettingsTabKey.account,
     if (isWindows &&
         !bind.isDisableSettings() &&
@@ -186,68 +256,14 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   List<_TabInfo> _settingTabs() {
     final List<_TabInfo> settingTabs = <_TabInfo>[];
     for (final tab in DesktopSettingPage.tabKeys) {
-      switch (tab) {
-        case SettingsTabKey.general:
-          settingTabs.add(_TabInfo(
-              tab, 'General', Icons.settings_outlined, Icons.settings));
-          break;
-        case SettingsTabKey.safety:
-          settingTabs.add(_TabInfo(tab, 'Security',
-              Icons.enhanced_encryption_outlined, Icons.enhanced_encryption));
-          break;
-        case SettingsTabKey.network:
-          settingTabs
-              .add(_TabInfo(tab, 'Network', Icons.link_outlined, Icons.link));
-          break;
-        case SettingsTabKey.display:
-          settingTabs.add(_TabInfo(tab, 'Display',
-              Icons.desktop_windows_outlined, Icons.desktop_windows));
-          break;
-        case SettingsTabKey.account:
-          settingTabs.add(
-              _TabInfo(tab, 'Account', Icons.person_outline, Icons.person));
-          break;
-        case SettingsTabKey.printer:
-          settingTabs
-              .add(_TabInfo(tab, 'Printer', Icons.print_outlined, Icons.print));
-          break;
-        case SettingsTabKey.about:
-          settingTabs
-              .add(_TabInfo(tab, 'About', Icons.info_outline, Icons.info));
-          break;
-      }
+      final (unselected, selected) = settingsTabIcons(tab);
+      settingTabs.add(_TabInfo(tab, settingsTabLabel(tab), unselected, selected));
     }
     return settingTabs;
   }
 
   List<Widget> _children() {
-    final children = List<Widget>.empty(growable: true);
-    for (final tab in DesktopSettingPage.tabKeys) {
-      switch (tab) {
-        case SettingsTabKey.general:
-          children.add(const _General());
-          break;
-        case SettingsTabKey.safety:
-          children.add(const _Safety());
-          break;
-        case SettingsTabKey.network:
-          children.add(const _Network());
-          break;
-        case SettingsTabKey.display:
-          children.add(const _Display());
-          break;
-        case SettingsTabKey.account:
-          children.add(const _Account());
-          break;
-        case SettingsTabKey.printer:
-          children.add(const _Printer());
-          break;
-        case SettingsTabKey.about:
-          children.add(const _About());
-          break;
-      }
-    }
-    return children;
+    return DesktopSettingPage.tabKeys.map(settingsTabPage).toList();
   }
 
   Widget _buildBlock({required List<Widget> children}) {
@@ -404,10 +420,15 @@ class _General extends StatefulWidget {
 }
 
 class _GeneralState extends State<_General> {
-  final RxBool serviceStop =
-      isWeb ? RxBool(false) : Get.find<RxBool>(tag: 'stop-service');
+  // The main window registers `stop-service`; a remote window showing this page in its General dropdown reads the
+  // option instead.
+  final RxBool serviceStop = isWeb
+      ? RxBool(false)
+      : Get.isRegistered<RxBool>(tag: 'stop-service')
+          ? Get.find<RxBool>(tag: 'stop-service')
+          : RxBool(option2bool(
+              kOptionStopService, bind.mainGetOptionSync(key: kOptionStopService)));
   RxBool serviceBtnEnabled = true.obs;
-  final GlobalKey _minToolbarOptionKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -531,16 +552,6 @@ class _GeneralState extends State<_General> {
         _OptionCheckBox(context, 'Confirm before closing multiple tabs',
             kOptionEnableConfirmClosingTabs,
             isServer: false),
-      if (!incomingOnly)
-        _OptionCheckBox(
-          context,
-          'allow-remote-toolbar-docking-any-edge',
-          kOptionAllowMultiEdgeToolbarDock,
-          isServer: false,
-          update: (_) {
-            reloadAllWindows();
-          },
-        ),
       if (!isWeb && !outgoingOnly)
         _OptionCheckBox(context, 'Adaptive bitrate', kOptionEnableAbr),
       if (!isWeb) wallpaper(),
@@ -679,47 +690,6 @@ class _GeneralState extends State<_General> {
           }
           await mainSetLocalBoolOption(key, value);
         },
-      ));
-    }
-    children.add(_OptionCheckBox(
-      context,
-      'Show monitor switch button on the main toolbar',
-      kOptionAllowMonitorSwitchMainToolbar,
-      isServer: false,
-      update: (enabled) async {
-        if (!enabled) {
-          await mainSetLocalBoolOption(
-              kOptionAllowMonitorSwitchMinToolbar, false);
-        }
-        if (mounted) setState(() {});
-        reloadAllWindows();
-        if (enabled) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            final ctx = _minToolbarOptionKey.currentContext;
-            if (ctx != null) {
-              Scrollable.ensureVisible(
-                ctx,
-                alignment: 0.5,
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeInOut,
-              );
-            }
-          });
-        }
-      },
-    ));
-    if (mainGetLocalBoolOptionSync(kOptionAllowMonitorSwitchMainToolbar)) {
-      children.add(KeyedSubtree(
-        key: _minToolbarOptionKey,
-        child: _OptionCheckBox(
-          context,
-          'Show on the minimized toolbar',
-          kOptionAllowMonitorSwitchMinToolbar,
-          isServer: false,
-          update: (_) {
-            reloadAllWindows();
-          },
-        ).marginOnly(left: _kCheckBoxLeftMargin * 3),
       ));
     }
     return _Card(title: 'Other', children: children);
@@ -2275,9 +2245,120 @@ class _DisplayState extends State<_Display> {
   }
 
   Widget other(BuildContext context) {
-    final children =
-        otherDefaultSettings().map((e) => otherRow(e.$1, e.$2)).toList();
+    final children = otherDefaultSettings()
+        .where((e) => !kToolbarDefaultSettingKeys.contains(e.$2))
+        .map((e) => otherRow(e.$1, e.$2))
+        .toList();
+    children.add(_OptionCheckBox(
+      context,
+      'Show the fallback cursor while the remote PC reports none',
+      kOptionAllowFallbackCursor,
+      isServer: false,
+    ));
     return _Card(title: 'Other Default Options', children: children);
+  }
+}
+
+/// Default options of a remote session that concern the toolbar; the Toolbar category shows them, the Display
+/// category's "Other Default Options" leaves them out.
+const kToolbarDefaultSettingKeys = [kKeyShowMonitorsToolbar, kOptionCollapseToolbar];
+
+class _Toolbar extends StatefulWidget {
+  const _Toolbar({Key? key}) : super(key: key);
+
+  @override
+  State<_Toolbar> createState() => _ToolbarState();
+}
+
+class _ToolbarState extends State<_Toolbar> {
+  final GlobalKey _minToolbarOptionKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final scrollController = ScrollController();
+    return ListView(controller: scrollController, children: [
+      _Card(title: 'Remote session toolbar', children: [
+        _OptionCheckBox(
+          context,
+          'allow-remote-toolbar-docking-any-edge',
+          kOptionAllowMultiEdgeToolbarDock,
+          isServer: false,
+          update: (_) {
+            reloadAllWindows();
+          },
+        ),
+        _OptionCheckBox(
+          context,
+          'Show monitor switch button on the main toolbar',
+          kOptionAllowMonitorSwitchMainToolbar,
+          isServer: false,
+          update: (enabled) async {
+            if (!enabled) {
+              await mainSetLocalBoolOption(
+                  kOptionAllowMonitorSwitchMinToolbar, false);
+            }
+            if (mounted) setState(() {});
+            reloadAllWindows();
+            if (enabled) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final ctx = _minToolbarOptionKey.currentContext;
+                if (ctx != null) {
+                  Scrollable.ensureVisible(
+                    ctx,
+                    alignment: 0.5,
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeInOut,
+                  );
+                }
+              });
+            }
+          },
+        ),
+        if (mainGetLocalBoolOptionSync(kOptionAllowMonitorSwitchMainToolbar))
+          KeyedSubtree(
+            key: _minToolbarOptionKey,
+            child: _OptionCheckBox(
+              context,
+              'Show on the minimized toolbar',
+              kOptionAllowMonitorSwitchMinToolbar,
+              isServer: false,
+              update: (_) {
+                reloadAllWindows();
+              },
+            ).marginOnly(left: _kCheckBoxLeftMargin * 3),
+          ),
+      ]),
+      _Card(
+          title: 'Default for new sessions',
+          children: otherDefaultSettings()
+              .where((e) => kToolbarDefaultSettingKeys.contains(e.$2))
+              .map((e) => _defaultRow(e.$1, e.$2))
+              .toList()),
+    ]).marginOnly(bottom: _kListViewBottomMargin);
+  }
+
+  /// Same row as `_DisplayState.otherRow()`: a user default option of every new session.
+  Widget _defaultRow(String label, String key) {
+    final value = getOtherDefaultSettingOption(key) == 'Y';
+    final isOptFixed = isOtherDefaultSettingReadOnly(key);
+    onChanged(bool b) async {
+      await setOtherDefaultSettingOption(key, b ? 'Y' : defaultOptionNo);
+      setState(() {});
+    }
+
+    return GestureDetector(
+        child: Row(
+          children: [
+            Checkbox(
+                    value: value,
+                    onChanged: isOptFixed ? null : (_) => onChanged(!value))
+                .marginOnly(right: 5),
+            Expanded(
+              child: Text(translate(label)),
+            )
+          ],
+        ).marginOnly(left: _kCheckBoxLeftMargin),
+        onTap: isOptFixed ? null : () => onChanged(!value));
   }
 }
 

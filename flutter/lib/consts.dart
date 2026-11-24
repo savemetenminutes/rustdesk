@@ -183,6 +183,8 @@ const String kOptionAllowSyncClipboardBetweenSessions =
     "allow-sync-clipboard-between-sessions";
 const String kOptionAllowSyncClipboardNestedSessions =
     "allow-sync-clipboard-nested-sessions";
+// Local option: paint `preDefaultCursor` while the peer has sent no cursor shape (off: this PC's own cursor).
+const String kOptionAllowFallbackCursor = "allow-fallback-cursor";
 const String kOptionEnableWebrtc = "enable-webrtc";
 const String kOptionRelayFallbackDelay = "relay-fallback-delay";
 const String kOptionEnableTrustedDevices = "enable-trusted-devices";

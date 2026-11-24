@@ -613,7 +613,11 @@ class _ImagePaintState extends State<ImagePaint> {
 
   MouseCursor _buildCustomCursor(BuildContext context, double scale) {
     final cursor = Provider.of<CursorModel>(context);
-    final cache = cursor.cache ?? preDefaultCursor.cache;
+    // Same rule as `_RemotePageState._buildCustomCursor()`: `preDefaultCursor` only with `kOptionAllowFallbackCursor`.
+    final cache = cursor.cache ??
+        (mainGetLocalBoolOptionSync(kOptionAllowFallbackCursor)
+            ? preDefaultCursor.cache
+            : null);
     return buildCursorOfCache(cursor, scale, cache);
   }
 

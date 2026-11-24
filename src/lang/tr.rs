@@ -831,5 +831,10 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Add a shortcut to keep on this PC", ""),
         ("Sync clipboard with nested sessions", ""),
         ("sync-clipboard-nested-sessions-tip", ""),
+        ("Toolbar", ""),
+        ("Remote session toolbar", ""),
+        ("Default for new sessions", ""),
+        ("Saved for this remote PC", ""),
+        ("Show the fallback cursor while the remote PC reports none", ""),
     ].iter().cloned().collect();
 }

@@ -559,7 +559,7 @@ pub fn core_main() -> Option<CoreMainAction> {
                         "id": id,
                         "uuid": uuid,
                     });
-                    let header = "Authorization: Bearer ".to_owned() + &token;
+                    let header = "Authorization: Bearer ".to_owned() + token.as_str();
                     if user_name.is_none()
                         && strategy_name.is_none()
                         && address_book_name.is_none()

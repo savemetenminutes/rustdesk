@@ -92,7 +92,7 @@ fn make_tray() -> hbb_common::ResultType<()> {
                 "{} - {}\n{}",
                 crate::get_app_name(),
                 translate("Ready".to_owned()),
-                translate("{".to_string() + &format!("{count}") + "} sessions"),
+                translate("{".to_string() + format!("{count}").as_str() + "} sessions"),
             )
         }
     };

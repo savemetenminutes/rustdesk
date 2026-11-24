@@ -961,7 +961,7 @@ async fn handle(data: Data, stream: &mut Connection) {
                     value = Some(password::temporary_password());
                 } else if name == "permanent-password-storage-and-salt" {
                     let (storage, salt) = Config::get_local_permanent_password_storage_and_salt();
-                    value = Some(storage + "\n" + &salt);
+                    value = Some(storage + "\n" + salt.as_str());
                 } else if name == "permanent-password-set" {
                     value = Some(if Config::has_permanent_password() {
                         "Y".to_owned()
@@ -1875,7 +1875,7 @@ pub fn set_unlock_pin(v: String, translate: bool) -> ResultType<()> {
         if len < min_len {
             let err = if translate {
                 crate::lang::translate(
-                    "Requires at least {".to_string() + &format!("{min_len}") + "} characters",
+                    "Requires at least {".to_string() + format!("{min_len}").as_str() + "} characters",
                 )
             } else {
                 // Sometimes, translated can't show normally in command line

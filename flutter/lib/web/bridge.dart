@@ -1587,6 +1587,24 @@ class RustdeskImpl {
   String mainNormalizeKeyboardShortcut({required String chord, dynamic hint}) =>
       '';
 
+  String mainKeyboardShortcutChords({dynamic hint}) => '[]';
+
+  String mainSettingsLayout({dynamic hint}) => '';
+
+  String mainSettingsLayoutPath({dynamic hint}) => '';
+
+  String mainListPeers({dynamic hint}) => '[]';
+
+  String mainGetPeerSetting(
+          {required String id, required String key, dynamic hint}) =>
+      '';
+
+  void mainSetPeerSetting(
+      {required String id,
+      required String key,
+      required String value,
+      dynamic hint}) {}
+
   String mainGetAudioOutputDevices({dynamic hint}) => '[]';
 
   Future<void> sessionSetAudioOutputDevice(

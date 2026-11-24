@@ -4283,3 +4283,13 @@ Widget? buildAvatarWidget({
     ),
   );
 }
+
+/// Display name of privacy mode implementation `implKey`. `nameKey` is the translation key the controlled side sends
+/// with it (`get_supported_privacy_mode_impl()`); it stays as sent, since the "Privacy mode 1" shortcut matches on it.
+/// The exclude-from-capture implementation is sent under the magnifier's key and is named here by its own.
+String privacyModeImplLabel(String implKey, String nameKey) {
+  if (implKey == kPrivacyModeImplExcludeFromCapture) {
+    return translate('privacy_mode_impl_exclude_from_capture_tip');
+  }
+  return translate(nameKey);
+}

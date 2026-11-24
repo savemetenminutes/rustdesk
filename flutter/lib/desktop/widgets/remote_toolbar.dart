@@ -28,7 +28,7 @@ import './audio_devices_dialog.dart';
 import 'package:flutter_hbb/utils/display_windows.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
-import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/settings_layout/settings_layout.dart';
 
 enum _ToolbarEdge { top, right, bottom, left }
 
@@ -808,11 +808,19 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       BuildContext context, _ToolbarEdge edge, bool isHorizontal) {
     final List<Widget> toolbarItems = [];
     toolbarItems.add(_PinMenu(state: widget.state));
-    // The settings screen's categories, one dropdown each, in the screen's order (`DesktopSettingPage.tabKeys`):
-    // each shows the same page as the screen. A separator follows; then this session's own buttons.
-    for (final tab in DesktopSettingPage.tabKeys) {
-      toolbarItems.add(_SettingsCategoryMenu(tab: tab, ffi: widget.ffi));
-    }
+    // The settings screen's categories (`settings_layout.json`), one dropdown each, in the screen's order: each shows
+    // the same page as the screen, its per-device column bound to this session. A separator follows; then this
+    // session's actions only.
+    toolbarItems.add(Obx(() {
+      SettingsLayout.revision.value;
+      return Flex(
+        direction: isHorizontal ? Axis.horizontal : Axis.vertical,
+        mainAxisSize: MainAxisSize.min,
+        children: SettingsLayout.current.categories
+            .map((c) => _SettingsCategoryMenu(category: c, ffi: widget.ffi))
+            .toList(),
+      );
+    }));
     toolbarItems.add(_ToolbarSeparator(isHorizontal: isHorizontal));
     toolbarItems.add(Obx(() {
       final privacyModeState = PrivacyModeState.find(widget.id);
@@ -846,20 +854,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
     toolbarItems
         .add(_ControlMenu(id: widget.id, ffi: widget.ffi, state: widget.state));
-    toolbarItems.add(_DisplayMenu(
-      id: widget.id,
-      ffi: widget.ffi,
-      state: widget.state,
-      setFullscreen: _setFullscreen,
-    ));
-    // Do not show keyboard for camera connection type.
-    if (widget.ffi.connType == ConnType.defaultConn) {
-      toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
-    }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
-    if (isWindows && widget.ffi.connType == ConnType.defaultConn) {
-      toolbarItems.add(_AudioDevicesMenu(ffi: widget.ffi));
-    }
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
     }
@@ -1726,351 +1721,6 @@ class ScreenAdjustor {
   }
 }
 
-class _DisplayMenu extends StatefulWidget {
-  final String id;
-  final FFI ffi;
-  final ToolbarState state;
-  final Function(bool) setFullscreen;
-  const _DisplayMenu(
-      {required this.id,
-      required this.ffi,
-      required this.state,
-      required this.setFullscreen});
-
-  @override
-  State<_DisplayMenu> createState() => _DisplayMenuState();
-}
-
-class _DisplayMenuState extends State<_DisplayMenu> {
-  final RxInt _customPercent = 100.obs;
-  late final ScreenAdjustor _screenAdjustor = ScreenAdjustor(
-    id: widget.id,
-    ffi: widget.ffi,
-    cbExitFullscreen: () => widget.setFullscreen(false),
-  );
-
-  int get windowId => stateGlobal.windowId;
-  Map<String, bool> get perms => widget.ffi.ffiModel.permissions;
-  PeerInfo get pi => widget.ffi.ffiModel.pi;
-  FfiModel get ffiModel => widget.ffi.ffiModel;
-  FFI get ffi => widget.ffi;
-  String get id => widget.id;
-
-  @override
-  void initState() {
-    super.initState();
-    // Initialize custom percent from stored option once
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        final v = await getSessionCustomScalePercent(widget.ffi.sessionId);
-        if (_customPercent.value != v) {
-          _customPercent.value = v;
-        }
-      } catch (_) {}
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    menuChildrenGetter(_IconSubmenuButtonState state) {
-      final menuChildren = <Widget>[
-        _screenAdjustor.adjustWindow(context),
-        viewStyle(customPercent: _customPercent),
-        scrollStyle(state, colorScheme),
-        imageQuality(),
-        codec(),
-        if (ffi.connType == ConnType.defaultConn)
-          _ResolutionsMenu(
-            id: widget.id,
-            ffi: widget.ffi,
-            screenAdjustor: _screenAdjustor,
-          ),
-        if (showVirtualDisplayMenu(ffi) && ffi.connType == ConnType.defaultConn)
-          _SubmenuButton(
-            ffi: widget.ffi,
-            menuChildren: getVirtualDisplayMenuChildren(ffi, id, null),
-            child: Text(translate("Virtual display")),
-          ),
-        if (ffi.connType == ConnType.defaultConn) cursorToggles(),
-        Divider(),
-        toggles(),
-      ];
-      // privacy mode
-      final privacyModeState = PrivacyModeState.find(id);
-      if (ffi.connType == ConnType.defaultConn &&
-          (pi.features.privacyMode || privacyModeState.isNotEmpty) &&
-          (ffiModel.keyboard || privacyModeState.isNotEmpty)) {
-        final privacyModeList =
-            toolbarPrivacyMode(privacyModeState, context, id, ffi);
-        if (privacyModeList.length == 1) {
-          menuChildren.add(CkbMenuButton(
-              value: privacyModeList[0].value,
-              onChanged: privacyModeList[0].onChanged,
-              child: privacyModeList[0].child,
-              ffi: ffi));
-        } else if (privacyModeList.length > 1) {
-          menuChildren.addAll([
-            Divider(),
-            _SubmenuButton(
-                ffi: widget.ffi,
-                child: Text(translate('Privacy mode')),
-                menuChildren: privacyModeList
-                    .map((e) => CkbMenuButton(
-                        value: e.value,
-                        onChanged: e.onChanged,
-                        child: e.child,
-                        ffi: ffi))
-                    .toList()),
-          ]);
-        }
-      }
-      return menuChildren;
-    }
-
-    return _IconSubmenuButton(
-      tooltip: 'Display of this session',
-      svg: "assets/display.svg",
-      ffi: widget.ffi,
-      color: _ToolbarTheme.blueColor,
-      hoverColor: _ToolbarTheme.hoverBlueColor,
-      menuChildrenGetter: menuChildrenGetter,
-    );
-  }
-
-  viewStyle({required RxInt customPercent}) {
-    return futureBuilder(
-        future: toolbarViewStyle(context, widget.id, widget.ffi),
-        hasData: (data) {
-          final v = data as List<TRadioMenu<String>>;
-          final bool isCustomSelected = v.isNotEmpty
-              ? v.first.groupValue == kRemoteViewStyleCustom
-              : false;
-          return Column(children: [
-            ...v.map((e) {
-              final isCustom = e.value == kRemoteViewStyleCustom;
-              final child = _savedForPeer(
-                  isCustom ? Text(translate('Scale custom')) : e.child);
-              // Whether the current selection is already custom
-              final bool isGroupCustomSelected =
-                  e.groupValue == kRemoteViewStyleCustom;
-              // Keep menu open when switching INTO custom so the slider is visible immediately
-              final bool keepOpenForThisItem =
-                  isCustom && !isGroupCustomSelected;
-              return RdoMenuButton<String>(
-                  value: e.value,
-                  groupValue: e.groupValue,
-                  onChanged: (value) {
-                    // Perform the original change
-                    e.onChanged?.call(value);
-                    // Only force a rebuild when we keep the menu open to reveal the slider
-                    if (keepOpenForThisItem) {
-                      setState(() {});
-                    }
-                  },
-                  child: child,
-                  ffi: ffi,
-                  // When entering custom, keep submenu open to show the slider controls
-                  closeOnActivate: !keepOpenForThisItem);
-            }).toList(),
-            // Only show a divider when custom is NOT selected
-            if (!isCustomSelected) Divider(),
-            _customControlsIfCustomSelected(
-                onChanged: (v) => customPercent.value = v),
-          ]);
-        });
-  }
-
-  Widget _customControlsIfCustomSelected({ValueChanged<int>? onChanged}) {
-    return futureBuilder(future: () async {
-      final current = await getSessionViewStyle(ffi.sessionId);
-      return current == kRemoteViewStyleCustom;
-    }(), hasData: (data) {
-      final isCustom = data as bool;
-      return AnimatedSwitcher(
-        duration: Duration(milliseconds: 220),
-        switchInCurve: Curves.easeOut,
-        switchOutCurve: Curves.easeIn,
-        child: isCustom
-            ? _CustomScaleMenuControls(ffi: ffi, onChanged: onChanged)
-            : SizedBox.shrink(),
-      );
-    });
-  }
-
-  scrollStyle(_IconSubmenuButtonState state, ColorScheme colorScheme) {
-    return futureBuilder(future: () async {
-      final viewStyle =
-          await getSessionViewStyle(ffi.sessionId) ?? '';
-      final visible = viewStyle == kRemoteViewStyleOriginal ||
-          viewStyle == kRemoteViewStyleCustom;
-      final scrollStyle =
-          await bind.sessionGetScrollStyle(sessionId: ffi.sessionId) ?? '';
-      final edgeScrollEdgeThickness = await bind
-          .sessionGetEdgeScrollEdgeThickness(sessionId: ffi.sessionId);
-      return {
-        'visible': visible,
-        'scrollStyle': scrollStyle,
-        'edgeScrollEdgeThickness': edgeScrollEdgeThickness,
-      };
-    }(), hasData: (data) {
-      final visible = data['visible'] as bool;
-      if (!visible) return Offstage();
-      final groupValue = data['scrollStyle'] as String;
-      final edgeScrollEdgeThickness = data['edgeScrollEdgeThickness'] as int;
-
-      onChangeScrollStyle(String? value) async {
-        if (value == null) return;
-        await bind.sessionSetScrollStyle(
-            sessionId: ffi.sessionId, value: value);
-        widget.ffi.canvasModel.updateScrollStyle();
-        state.setState(() {});
-      }
-
-      onChangeEdgeScrollEdgeThickness(double? value) async {
-        if (value == null) return;
-        final newThickness = value.round();
-        await bind.sessionSetEdgeScrollEdgeThickness(
-            sessionId: ffi.sessionId, value: newThickness);
-        widget.ffi.canvasModel.updateEdgeScrollEdgeThickness(newThickness);
-        state.setState(() {});
-      }
-
-      return Obx(() => Column(children: [
-            RdoMenuButton<String>(
-              child: _savedForPeer(Text(translate('ScrollAuto'))),
-              value: kRemoteScrollStyleAuto,
-              groupValue: groupValue,
-              onChanged: widget.ffi.canvasModel.imageOverflow.value
-                  ? (value) => onChangeScrollStyle(value)
-                  : null,
-              closeOnActivate: groupValue != kRemoteScrollStyleEdge,
-              ffi: widget.ffi,
-            ),
-            RdoMenuButton<String>(
-              child: _savedForPeer(Text(translate('Scrollbar'))),
-              value: kRemoteScrollStyleBar,
-              groupValue: groupValue,
-              onChanged: widget.ffi.canvasModel.imageOverflow.value
-                  ? (value) => onChangeScrollStyle(value)
-                  : null,
-              closeOnActivate: groupValue != kRemoteScrollStyleEdge,
-              ffi: widget.ffi,
-            ),
-            if (!isWeb) ...[
-              RdoMenuButton<String>(
-                child: _savedForPeer(Text(translate('ScrollEdge'))),
-                value: kRemoteScrollStyleEdge,
-                groupValue: groupValue,
-                closeOnActivate: false,
-                onChanged: widget.ffi.canvasModel.imageOverflow.value
-                    ? (value) => onChangeScrollStyle(value)
-                    : null,
-                ffi: widget.ffi,
-              ),
-              Offstage(
-                  offstage: groupValue != kRemoteScrollStyleEdge,
-                  child: EdgeThicknessControl(
-                    value: edgeScrollEdgeThickness.toDouble(),
-                    onChanged: onChangeEdgeScrollEdgeThickness,
-                    colorScheme: colorScheme,
-                  )),
-            ],
-            Divider(),
-          ]));
-    });
-  }
-
-  imageQuality() {
-    return futureBuilder(
-        future: toolbarImageQuality(context, widget.id, widget.ffi),
-        hasData: (data) {
-          final v = data as List<TRadioMenu<String>>;
-          return _SubmenuButton(
-            ffi: widget.ffi,
-            child: _savedForPeer(Text(translate('Image Quality'))),
-            menuChildren: v
-                .map((e) => RdoMenuButton<String>(
-                    value: e.value,
-                    groupValue: e.groupValue,
-                    onChanged: e.onChanged,
-                    child: e.child,
-                    ffi: ffi))
-                .toList(),
-          );
-        });
-  }
-
-  codec() {
-    return futureBuilder(
-        future: toolbarCodec(context, id, ffi),
-        hasData: (data) {
-          final v = data as List<TRadioMenu<String>>;
-          if (v.isEmpty) return Offstage();
-
-          return _SubmenuButton(
-              ffi: widget.ffi,
-              child: _savedForPeer(Text(translate('Codec'))),
-              menuChildren: v
-                  .map((e) => RdoMenuButton(
-                      value: e.value,
-                      groupValue: e.groupValue,
-                      onChanged: e.onChanged,
-                      child: e.child,
-                      ffi: ffi))
-                  .toList());
-        });
-  }
-
-  cursorToggles() {
-    return futureBuilder(
-        future: toolbarCursor(context, id, ffi),
-        hasData: (data) {
-          final v = data as List<TToggleMenu>;
-          if (v.isEmpty) return Offstage();
-          return Column(children: [
-            Divider(),
-            // Every cursor toggle is a `toggle_option()` of the peer config.
-            ...v
-                .map((e) => CkbMenuButton(
-                    value: e.value,
-                    onChanged: e.onChanged,
-                    child: _savedForPeer(e.child),
-                    ffi: ffi))
-                .toList(),
-          ]);
-        });
-  }
-
-  toggles() {
-    return futureBuilder(
-        future: toolbarDisplayToggle(context, id, ffi),
-        hasData: (data) {
-          // Mute lives in the speaker button's Audio dialog (`audioDevicesDialog()`) where that button exists; the
-          // entry stays in `toolbarDisplayToggle()` so its keyboard shortcut is still registered.
-          final v = (data as List<TToggleMenu>)
-              .where((e) => !(isWindows &&
-                  ffi.connType == ConnType.defaultConn &&
-                  e.actionId == kShortcutActionToggleMute))
-              .toList();
-          if (v.isEmpty) return Offstage();
-          return Column(children: [
-            for (final e in v) ...[
-              // Peer config toggles, displays as individual windows and use all my displays are saved for the
-              // peer; Mute is not (`audio-mute-saved`, the Audio dialog's Save).
-              CkbMenuButton(
-                  value: e.value,
-                  onChanged: e.onChanged,
-                  child: e.actionId == kShortcutActionToggleMute
-                      ? e.child
-                      : _savedForPeer(e.child),
-                  ffi: ffi),
-            ],
-          ]);
-        });
-  }
-}
-
 class _CustomScaleMenuControls extends StatefulWidget {
   final FFI ffi;
   final ValueChanged<int>? onChanged;
@@ -2569,288 +2219,6 @@ class _ResolutionsMenuState extends State<_ResolutionsMenu> {
     }
     return bestFitResolution.width == rect?.width.toInt() &&
         bestFitResolution.height == rect?.height.toInt();
-  }
-}
-
-class _KeyboardMenu extends StatelessWidget {
-  final String id;
-  final FFI ffi;
-  _KeyboardMenu({
-    Key? key,
-    required this.id,
-    required this.ffi,
-  }) : super(key: key);
-
-  PeerInfo get pi => ffi.ffiModel.pi;
-
-  @override
-  Widget build(BuildContext context) {
-    var ffiModel = Provider.of<FfiModel>(context);
-    if (!ffiModel.keyboard) return Offstage();
-    toolbarToggles() {
-      final toggles = toolbarKeyboardToggles(ffi)
-          .map((e) => CkbMenuButton(
-              value: e.value,
-              onChanged: e.onChanged,
-              child: e.savedForPeer ? _savedForPeer(e.child) : e.child,
-              ffi: ffi) as Widget)
-          .toList();
-      if (toggles.isNotEmpty) {
-        toggles.add(Divider());
-      }
-      return toggles;
-    }
-
-    return _IconSubmenuButton(
-        tooltip: 'Keyboard Settings',
-        svg: "assets/keyboard_mouse.svg",
-        ffi: ffi,
-        color: _ToolbarTheme.blueColor,
-        hoverColor: _ToolbarTheme.hoverBlueColor,
-        menuChildrenGetter: (_) => [
-              keyboardMode(),
-              localKeyboardType(),
-              inputSource(),
-              Divider(),
-              viewMode(),
-              if ([kPeerPlatformWindows, kPeerPlatformMacOS, kPeerPlatformLinux]
-                  .contains(pi.platform))
-                showMyCursor(),
-              Divider(),
-              ...toolbarToggles(),
-              ...mouseSpeed(),
-              // The exclude list is applied in the keyboard grab hook, which input source 2 does not use.
-              if (isWindows && !ffi.ffiModel.viewOnly && !isInputSourceFlutter)
-                MenuButton(
-                  child: _savedForPeer(
-                          Text(translate('Shortcuts sent to the remote PC')))
-                      .paddingOnly(left: 26.0),
-                  onPressed: () => keyboardExcludeShortcutsDialog(ffi),
-                  ffi: ffi,
-                ),
-              ...mobileActions(),
-            ]);
-  }
-
-  mouseSpeed() {
-    final speedWidgets = [];
-    final sessionId = ffi.sessionId;
-    if (isDesktop) {
-      if (ffi.ffiModel.keyboard) {
-        final enabled = !ffi.ffiModel.viewOnly;
-        final trackpad = MenuButton(
-          child: Text(translate('Trackpad speed')).paddingOnly(left: 26.0),
-          onPressed: enabled ? () => trackpadSpeedDialog(sessionId, ffi) : null,
-          ffi: ffi,
-        );
-        speedWidgets.add(trackpad);
-      }
-    }
-    return speedWidgets;
-  }
-
-  keyboardMode() {
-    return futureBuilder(future: () async {
-      return await bind.sessionGetKeyboardMode(sessionId: ffi.sessionId) ??
-          kKeyLegacyMode;
-    }(), hasData: (data) {
-      final groupValue = data as String;
-      List<InputModeMenu> modes = [
-        InputModeMenu(key: kKeyLegacyMode, menu: 'Legacy mode'),
-        InputModeMenu(key: kKeyMapMode, menu: 'Map mode'),
-        InputModeMenu(key: kKeyTranslateMode, menu: 'Translate mode'),
-      ];
-      List<RdoMenuButton> list = [];
-      final enabled = !ffi.ffiModel.viewOnly;
-      onChanged(String? value) async {
-        if (value == null) return;
-        await bind.sessionSetKeyboardMode(
-            sessionId: ffi.sessionId, value: value);
-        await ffi.inputModel.updateKeyboardMode();
-      }
-
-      // If use flutter to grab keys, we can only use one mode.
-      // Map mode and Legacy mode, at least one of them is supported.
-      String? modeOnly;
-      // Keep both map and legacy mode on web at the moment.
-      // TODO: Remove legacy mode after web supports translate mode on web.
-      if (isInputSourceFlutter && isDesktop) {
-        if (bind.sessionIsKeyboardModeSupported(
-            sessionId: ffi.sessionId, mode: kKeyMapMode)) {
-          modeOnly = kKeyMapMode;
-        } else if (bind.sessionIsKeyboardModeSupported(
-            sessionId: ffi.sessionId, mode: kKeyLegacyMode)) {
-          modeOnly = kKeyLegacyMode;
-        }
-      }
-
-      for (InputModeMenu mode in modes) {
-        if (modeOnly != null && mode.key != modeOnly) {
-          continue;
-        } else if (!bind.sessionIsKeyboardModeSupported(
-            sessionId: ffi.sessionId, mode: mode.key)) {
-          continue;
-        }
-
-        if (pi.isWayland && mode.key != kKeyMapMode) {
-          continue;
-        }
-
-        var text = translate(mode.menu);
-        if (mode.key == kKeyTranslateMode) {
-          text = '$text beta';
-        }
-        list.add(RdoMenuButton<String>(
-          child: _savedForPeer(Text(text)),
-          value: mode.key,
-          groupValue: groupValue,
-          onChanged: enabled ? onChanged : null,
-          ffi: ffi,
-        ));
-      }
-      return Column(children: list);
-    });
-  }
-
-  localKeyboardType() {
-    final localPlatform = getLocalPlatformForKBLayoutType(pi.platform);
-    final visible = localPlatform != '';
-    if (!visible) return Offstage();
-    final enabled = !ffi.ffiModel.viewOnly;
-    return Column(
-      children: [
-        Divider(),
-        MenuButton(
-          child: Text(
-              '${translate('Local keyboard type')}: ${KBLayoutType.value}'),
-          trailingIcon: const Icon(Icons.settings),
-          ffi: ffi,
-          onPressed: enabled
-              ? () => showKBLayoutTypeChooser(localPlatform, ffi.dialogManager)
-              : null,
-        )
-      ],
-    );
-  }
-
-  inputSource() {
-    final supportedInputSource = bind.mainSupportedInputSource();
-    if (supportedInputSource.isEmpty) return Offstage();
-    late final List<dynamic> supportedInputSourceList;
-    try {
-      supportedInputSourceList = jsonDecode(supportedInputSource);
-    } catch (e) {
-      debugPrint('Failed to decode $supportedInputSource, $e');
-      return;
-    }
-    if (supportedInputSourceList.length < 2) return Offstage();
-    final inputSource = stateGlobal.getInputSource();
-    final enabled = !ffi.ffiModel.viewOnly;
-    final children = <Widget>[Divider()];
-    children.addAll(supportedInputSourceList.map((e) {
-      final d = e as List<dynamic>;
-      return RdoMenuButton<String>(
-        child: Text(translate(d[1] as String)),
-        value: d[0] as String,
-        groupValue: inputSource,
-        onChanged: enabled
-            ? (v) async {
-                if (v != null) {
-                  await stateGlobal.setInputSource(ffi.sessionId, v);
-                  // Release native input; see the macOS trade-offs in RemotePage.
-                  if (isMacOS) ffi.inputModel.enterOrLeave(false);
-                  await ffi.ffiModel.checkDesktopKeyboardMode();
-                  await ffi.inputModel.updateKeyboardMode();
-                }
-              }
-            : null,
-        ffi: ffi,
-      );
-    }));
-    return Column(children: children);
-  }
-
-  viewMode() {
-    final ffiModel = ffi.ffiModel;
-    final enabled = versionCmp(pi.version, '1.2.0') >= 0 && ffiModel.keyboard;
-    return CkbMenuButton(
-        value: ffiModel.viewOnly,
-        onChanged: enabled
-            ? (value) async {
-                if (value == null) return;
-                await bind.sessionToggleOption(
-                    sessionId: ffi.sessionId, value: kOptionToggleViewOnly);
-                final viewOnly = await bind.sessionGetToggleOption(
-                    sessionId: ffi.sessionId, arg: kOptionToggleViewOnly);
-                ffiModel.setViewOnly(id, viewOnly ?? value);
-                final showMyCursor = await bind.sessionGetToggleOption(
-                    sessionId: ffi.sessionId, arg: kOptionToggleShowMyCursor);
-                ffiModel.setShowMyCursor(showMyCursor ?? value);
-              }
-            : null,
-        ffi: ffi,
-        child: _savedForPeer(Text(translate('View Mode'))));
-  }
-
-  showMyCursor() {
-    final ffiModel = ffi.ffiModel;
-    return CkbMenuButton(
-            value: ffiModel.showMyCursor,
-            onChanged: (value) async {
-              if (value == null) return;
-              await bind.sessionToggleOption(
-                  sessionId: ffi.sessionId, value: kOptionToggleShowMyCursor);
-              final showMyCursor = await bind.sessionGetToggleOption(
-                      sessionId: ffi.sessionId,
-                      arg: kOptionToggleShowMyCursor) ??
-                  value;
-              ffiModel.setShowMyCursor(showMyCursor);
-
-              // Also set view only if showMyCursor is enabled and viewOnly is not enabled.
-              if (showMyCursor && !ffiModel.viewOnly) {
-                await bind.sessionToggleOption(
-                    sessionId: ffi.sessionId, value: kOptionToggleViewOnly);
-                final viewOnly = await bind.sessionGetToggleOption(
-                    sessionId: ffi.sessionId, arg: kOptionToggleViewOnly);
-                ffiModel.setViewOnly(id, viewOnly ?? value);
-              }
-            },
-            ffi: ffi,
-            child: _savedForPeer(Text(translate('Show my cursor'))))
-        .paddingOnly(left: 26.0);
-  }
-
-  mobileActions() {
-    if (pi.platform != kPeerPlatformAndroid) return [];
-    final enabled = versionCmp(pi.version, '1.2.7') >= 0;
-    if (!enabled) return [];
-    return [
-      Divider(),
-      MenuButton(
-          child: Text(translate('Back')),
-          onPressed: () => ffi.inputModel.onMobileBack(),
-          ffi: ffi),
-      MenuButton(
-          child: Text(translate('Home')),
-          onPressed: () => ffi.inputModel.onMobileHome(),
-          ffi: ffi),
-      MenuButton(
-          child: Text(translate('Apps')),
-          onPressed: () => ffi.inputModel.onMobileApps(),
-          ffi: ffi),
-      MenuButton(
-          child: Text(translate('Volume up')),
-          onPressed: () => ffi.inputModel.onMobileVolumeUp(),
-          ffi: ffi),
-      MenuButton(
-          child: Text(translate('Volume down')),
-          onPressed: () => ffi.inputModel.onMobileVolumeDown(),
-          ffi: ffi),
-      MenuButton(
-          child: Text(translate('Power')),
-          onPressed: () => ffi.inputModel.onMobilePower(),
-          ffi: ffi),
-    ];
   }
 }
 
@@ -3830,37 +3198,46 @@ class EdgeThicknessControl extends StatelessWidget {
   }
 }
 
-/// A settings category of the settings screen as a toolbar dropdown: the panel is `settingsTabPage(tab)`, the page
-/// the settings screen shows for that category, with the category's icon (`settingsTabIcons()`).
+/// A settings category of `settings_layout.json` as a toolbar dropdown: the panel is the category's page
+/// (`SettingsCategoryPage`) bound to this session, the same page the settings screen shows.
 class _SettingsCategoryMenu extends StatelessWidget {
-  final SettingsTabKey tab;
+  final SettingsCategory category;
   final FFI ffi;
-  const _SettingsCategoryMenu({Key? key, required this.tab, required this.ffi})
+  const _SettingsCategoryMenu({Key? key, required this.category, required this.ffi})
       : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final (_, glyph) = settingsTabIcons(tab);
     return _IconSubmenuButton(
       icon: SizedBox(
         width: _ToolbarTheme.buttonSize,
         height: _ToolbarTheme.buttonSize,
         child: Center(
-          child: Icon(glyph,
+          child: Icon(category.iconData,
               color: Colors.white, size: _ToolbarTheme.buttonSize * 0.625),
         ),
       ),
-      tooltip: '${translate(settingsTabLabel(tab))} ${translate('Settings')}',
+      tooltip: category.label,
       ffi: ffi,
       color: _ToolbarTheme.blueColor,
       hoverColor: _ToolbarTheme.hoverBlueColor,
-      menuChildrenGetter: (_) => [_settingsCategoryPanel(context, tab)],
+      menuChildrenGetter: (_) {
+        final height =
+            (MediaQuery.of(context).size.height * 0.8).clamp(240.0, 760.0);
+        final width = category.hasColumns ? 860.0 : 560.0;
+        return [
+          SizedBox(
+              width: width,
+              height: height,
+              child: SettingsCategoryPage(categoryId: category.id, ffi: ffi)),
+        ];
+      },
     );
   }
 }
 
-/// Separator between the settings-screen category buttons and the session's own buttons: a thin line across the
-/// toolbar's flow direction.
+/// Separator between the settings category buttons and the session's actions: a thin line across the toolbar's
+/// flow direction.
 class _ToolbarSeparator extends StatelessWidget {
   final bool isHorizontal;
   const _ToolbarSeparator({Key? key, required this.isHorizontal})
@@ -3879,48 +3256,116 @@ class _ToolbarSeparator extends StatelessWidget {
   }
 }
 
-/// `settingsTabPage(tab)` in a box of the settings screen's content width, as tall as the window allows.
-Widget _settingsCategoryPanel(BuildContext context, SettingsTabKey tab) {
-  final height = (MediaQuery.of(context).size.height * 0.8).clamp(240.0, 760.0);
-  return SizedBox(width: 560, height: height, child: settingsTabPage(tab));
-}
+/// Registers the remote session's "widget" / "session" builders of `settings_layout.json` in this isolate: the
+/// session-only controls the category pages show inside a session (`SettingsTarget.ffi`); outside a session each
+/// returns null and the row is left out.
+void registerSessionSettingsBuilders() {
+  bool defaultConn(FFI f) => f.connType == ConnType.defaultConn;
+  ScreenAdjustor adjustor(FFI f) => ScreenAdjustor(
+      id: f.id, ffi: f, cbExitFullscreen: () => stateGlobal.setFullscreen(false));
 
-/// `child` of a setting this session stores in the peer's config, so the next connection to the peer starts with
-/// it: followed by a floppy glyph.
-Widget _savedForPeer(Widget child) {
-  return Row(mainAxisSize: MainAxisSize.min, children: [
-    Flexible(child: child),
-    const SizedBox(width: 6),
-    Tooltip(
-      message: translate('Saved for this remote PC'),
-      child: const Icon(Icons.save_outlined, size: 14),
-    ),
-  ]);
-}
-
-/// Speaker button: output device of this PC and capture device of the remote PC (`audioDevicesDialog()`).
-class _AudioDevicesMenu extends StatelessWidget {
-  final FFI ffi;
-  const _AudioDevicesMenu({Key? key, required this.ffi}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return _IconMenuButton(
-      // Same footprint as the SVG icons: a `buttonSize` square (the blue `Ink` tile) with a ~20 px glyph centered.
-      icon: SizedBox(
-        width: _ToolbarTheme.buttonSize,
-        height: _ToolbarTheme.buttonSize,
-        child: Center(
-          child: Icon(Icons.volume_up,
-              color: Colors.white, size: _ToolbarTheme.buttonSize * 0.625),
-        ),
-      ),
-      tooltip: 'Audio devices',
-      color: _ToolbarTheme.blueColor,
-      hoverColor: _ToolbarTheme.hoverBlueColor,
-      onPressed: () => audioDevicesDialog(ffi),
+  settingsWidgetBuilders['session.adjustWindow'] = (_, context, t) {
+    final f = t.ffi;
+    if (f == null) return null;
+    return adjustor(f).adjustWindow(context);
+  };
+  settingsWidgetBuilders['session.resolution'] = (_, __, t) {
+    final f = t.ffi;
+    if (f == null || !defaultConn(f)) return null;
+    return _ResolutionsMenu(id: f.id, ffi: f, screenAdjustor: adjustor(f));
+  };
+  settingsWidgetBuilders['session.virtualDisplay'] = (_, __, t) {
+    final f = t.ffi;
+    if (f == null || !defaultConn(f) || !showVirtualDisplayMenu(f)) return null;
+    return _SubmenuButton(
+      ffi: f,
+      menuChildren: getVirtualDisplayMenuChildren(f, f.id, null),
+      child: Text(translate('Virtual display')),
     );
-  }
+  };
+  settingsWidgetBuilders['session.customScale'] = (_, __, t) {
+    final f = t.ffi;
+    if (f == null) return null;
+    return _CustomScaleMenuControls(ffi: f);
+  };
+  settingsWidgetBuilders['session.privacyMode'] = (_, context, t) {
+    final f = t.ffi;
+    if (f == null || !defaultConn(f)) return null;
+    final pi = f.ffiModel.pi;
+    final state = PrivacyModeState.find(f.id);
+    if (!((pi.features.privacyMode || state.isNotEmpty) &&
+        (f.ffiModel.keyboard || state.isNotEmpty))) {
+      return null;
+    }
+    final list = toolbarPrivacyMode(state, context, f.id, f);
+    if (list.isEmpty) return null;
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: list
+            .map((e) => CkbMenuButton(
+                value: e.value, onChanged: e.onChanged, child: e.child, ffi: f))
+            .toList());
+  };
+  settingsWidgetBuilders['session.relativeMouse'] = (_, __, t) {
+    final f = t.ffi;
+    if (f == null) return null;
+    final rel = toolbarKeyboardToggles(f)
+        .where((e) => e.child is Text && (e.child as Text).data == translate('Relative mouse mode'))
+        .toList();
+    if (rel.isEmpty) return null;
+    return CkbMenuButton(
+        value: rel.first.value, onChanged: rel.first.onChanged, child: rel.first.child, ffi: f);
+  };
+  settingsWidgetBuilders['session.keyboardExclude'] = (_, __, t) {
+    final f = t.ffi;
+    // The exclude list is applied in the keyboard grab hook, which input source 2 does not use.
+    if (f == null || !isWindows || f.ffiModel.viewOnly || isInputSourceFlutter) return null;
+    return MenuButton(
+      child: Text(translate('Keyboard chord routing')),
+      trailingIcon: const Icon(Icons.save_outlined, size: 14),
+      onPressed: () => keyboardExcludeShortcutsDialog(f),
+      ffi: f,
+    );
+  };
+  settingsWidgetBuilders['session.localKeyboardType'] = (_, __, t) {
+    final f = t.ffi;
+    if (f == null) return null;
+    final localPlatform = getLocalPlatformForKBLayoutType(f.ffiModel.pi.platform);
+    if (localPlatform == '') return null;
+    return MenuButton(
+      child: Text('${translate('Local keyboard type')}: ${KBLayoutType.value}'),
+      trailingIcon: const Icon(Icons.settings),
+      ffi: f,
+      onPressed: f.ffiModel.viewOnly
+          ? null
+          : () => showKBLayoutTypeChooser(localPlatform, f.dialogManager),
+    );
+  };
+  settingsWidgetBuilders['session.audioDevices'] = (_, __, t) {
+    final f = t.ffi;
+    if (f == null || !isWindows || !defaultConn(f)) return null;
+    return MenuButton(
+      child: Text(translate('Audio devices')),
+      trailingIcon: const Icon(Icons.volume_up),
+      onPressed: () => audioDevicesDialog(f),
+      ffi: f,
+    );
+  };
+  settingsWidgetBuilders['session.mobileActions'] = (_, __, t) {
+    final f = t.ffi;
+    if (f == null) return null;
+    final pi = f.ffiModel.pi;
+    if (pi.platform != kPeerPlatformAndroid || versionCmp(pi.version, '1.2.7') < 0) return null;
+    final m = f.inputModel;
+    return Column(children: [
+      MenuButton(child: Text(translate('Back')), onPressed: () => m.onMobileBack(), ffi: f),
+      MenuButton(child: Text(translate('Home')), onPressed: () => m.onMobileHome(), ffi: f),
+      MenuButton(child: Text(translate('Apps')), onPressed: () => m.onMobileApps(), ffi: f),
+      MenuButton(child: Text(translate('Volume up')), onPressed: () => m.onMobileVolumeUp(), ffi: f),
+      MenuButton(child: Text(translate('Volume down')), onPressed: () => m.onMobileVolumeDown(), ffi: f),
+      MenuButton(child: Text(translate('Power')), onPressed: () => m.onMobilePower(), ffi: f),
+    ]);
+  };
 }
 
 class _MinimizedMonitorSwitchButton extends StatelessWidget {

@@ -756,6 +756,123 @@ pub fn main_display_windows_log(message: String) -> SyncReturn<()> {
     SyncReturn(())
 }
 
+/// The settings layout override `settings_layout.json` in the config directory (`Config::path()`); "" when there is
+/// none, so the app uses its bundled `assets/settings_layout.json`.
+pub fn main_settings_layout() -> SyncReturn<String> {
+    let path = hbb_common::config::Config::path("settings_layout.json");
+    SyncReturn(std::fs::read_to_string(path).unwrap_or_default())
+}
+
+/// Path of the settings layout override file, for the settings screen to show.
+pub fn main_settings_layout_path() -> SyncReturn<String> {
+    SyncReturn(
+        hbb_common::config::Config::path("settings_layout.json")
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
+/// JSON array `[{"id","alias","hostname","username"}]` of every stored peer, newest first.
+pub fn main_list_peers() -> SyncReturn<String> {
+    let list: Vec<serde_json::Value> = hbb_common::config::PeerConfig::peers(None)
+        .into_iter()
+        .map(|(id, _, c)| {
+            serde_json::json!({
+                "id": id,
+                "alias": c.options.get("alias").cloned().unwrap_or_default(),
+                "hostname": c.info.hostname,
+                "username": c.info.username,
+            })
+        })
+        .collect();
+    SyncReturn(serde_json::to_string(&list).unwrap_or_default())
+}
+
+macro_rules! peer_bool_fields {
+    ($m:ident) => {
+        $m!(
+            "show_remote_cursor" => show_remote_cursor,
+            "lock_after_session_end" => lock_after_session_end,
+            "privacy_mode" => privacy_mode,
+            "allow_swap_key" => allow_swap_key,
+            "disable_audio" => disable_audio,
+            "disable_clipboard" => disable_clipboard,
+            "enable-file-copy-paste" => enable_file_copy_paste,
+            "show_quality_monitor" => show_quality_monitor,
+            "follow_remote_cursor" => follow_remote_cursor,
+            "follow_remote_window" => follow_remote_window,
+            "view_only" => view_only,
+            "show_my_cursor" => show_my_cursor,
+            "sync-init-clipboard" => sync_init_clipboard,
+            "terminal-persistent" => terminal_persistent
+        )
+    };
+}
+
+/// A stored setting of peer `id` by name: the `PeerConfig` field of that name (bool fields as "Y" / "N"), else its
+/// `options` entry; "" when unset. Works without a session, for the settings screen's per-device column.
+pub fn main_get_peer_setting(id: String, key: String) -> SyncReturn<String> {
+    let c = hbb_common::config::PeerConfig::load(&id);
+    macro_rules! get_bool {
+        ($($name:literal => $field:ident),*) => {
+            match key.as_str() {
+                $($name => return SyncReturn(if c.$field.v { "Y" } else { "N" }.to_owned()),)*
+                _ => {}
+            }
+        };
+    }
+    peer_bool_fields!(get_bool);
+    let v = match key.as_str() {
+        "view_style" => c.view_style.clone(),
+        "scroll_style" => c.scroll_style.clone(),
+        "image_quality" => c.image_quality.clone(),
+        "keyboard_mode" => c.keyboard_mode.clone(),
+        "reverse_mouse_wheel" => c.reverse_mouse_wheel.clone(),
+        "displays_as_individual_windows" => c.displays_as_individual_windows.clone(),
+        "trackpad-speed" => c.trackpad_speed.to_string(),
+        "edge_scroll_edge_thickness" => c.edge_scroll_edge_thickness.to_string(),
+        _ => c.options.get(&key).cloned().unwrap_or_default(),
+    };
+    SyncReturn(v)
+}
+
+/// Stores setting `key` = `value` of peer `id` (the counterpart of `main_get_peer_setting`); "" removes an
+/// `options` entry. Loads the peer file, changes the one value and stores it, so values other writers saved stay.
+pub fn main_set_peer_setting(id: String, key: String, value: String) -> SyncReturn<()> {
+    let mut c = hbb_common::config::PeerConfig::load(&id);
+    let yes = value == "Y";
+    macro_rules! set_bool {
+        ($($name:literal => $field:ident),*) => {
+            match key.as_str() {
+                $($name => { c.$field.v = yes; c.store(&id); return SyncReturn(()); })*
+                _ => {}
+            }
+        };
+    }
+    peer_bool_fields!(set_bool);
+    match key.as_str() {
+        "view_style" => c.view_style = value,
+        "scroll_style" => c.scroll_style = value,
+        "image_quality" => c.image_quality = value,
+        "keyboard_mode" => c.keyboard_mode = value,
+        "reverse_mouse_wheel" => c.reverse_mouse_wheel = value,
+        "displays_as_individual_windows" => c.displays_as_individual_windows = value,
+        "trackpad-speed" => c.trackpad_speed = value.parse().unwrap_or(c.trackpad_speed),
+        "edge_scroll_edge_thickness" => {
+            c.edge_scroll_edge_thickness = value.parse().unwrap_or(c.edge_scroll_edge_thickness)
+        }
+        _ => {
+            if value.is_empty() {
+                c.options.remove(&key);
+            } else {
+                c.options.insert(key, value);
+            }
+        }
+    }
+    c.store(&id);
+    SyncReturn(())
+}
+
 /// `"left,top,right,bottom"` (`GetWindowRect`, screen pixels) of the top-level window under screen point `(x, y)`,
 /// i.e. the window the user sees there; "" when there is none or off Windows. `WindowFromPoint` ignores the mouse
 /// capture a drag holds, so it answers for the window under the cursor, not the capturing one.
@@ -1051,6 +1168,24 @@ pub fn main_take_recorded_keyboard_shortcut() -> SyncReturn<String> {
     return SyncReturn(crate::keyboard::exclude::take_recorded_chord());
     #[cfg(any(target_os = "android", target_os = "ios"))]
     SyncReturn("".to_owned())
+}
+
+/// The chords bound to RustDesk actions by the keyboard-shortcut bindings, as JSON
+/// `[{"chord", "binding": {"action", "mods", "key"}}, ...]` with chords in the canonical exclude-list form
+/// (`exclude::shortcut_chords()`), for the chord routing dialog.
+pub fn main_keyboard_shortcut_chords() -> SyncReturn<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return SyncReturn(
+        serde_json::to_string(
+            &crate::keyboard::exclude::shortcut_chords()
+                .into_iter()
+                .map(|(chord, binding)| serde_json::json!({ "chord": chord, "binding": binding }))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default(),
+    );
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    SyncReturn("[]".to_owned())
 }
 
 /// Canonical form of a keyboard chord (`Ctrl+Alt+Shift+Win+<key>`), or "" when it is not a valid chord.

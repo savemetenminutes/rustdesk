@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'package:flutter_hbb/desktop/settings_layout/settings_layout.dart';
 import 'dart:ui' as ui;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -511,6 +512,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       tabController.clear();
     } else if (call.method == kWindowActionRebuild) {
       reloadCurrentWindow();
+    } else if (call.method == kWindowActionReloadSettingsLayout) {
+      await SettingsLayout.reload();
     } else if (call.method == kWindowEventActiveSession) {
       final jumpOk = tabController.jumpToByKey(call.arguments);
       if (jumpOk) {

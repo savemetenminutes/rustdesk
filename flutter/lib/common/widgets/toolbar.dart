@@ -1307,7 +1307,7 @@ List<TToggleMenu> toolbarPrivacyMode(
       final enabled = !ffiModel.viewOnly &&
           (hasPrivacyModePermission || privacyModeState.value == implKey);
       return TToggleMenu(
-          child: Text(translate(implName)),
+          child: Text(privacyModeImplLabel(implKey, implName)),
           value: privacyModeState.value == implKey,
           onChanged: enabled
               ? (value) {

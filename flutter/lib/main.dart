@@ -16,6 +16,9 @@ import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_remote_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_terminal_screen.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
+import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
+import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/settings_layout/settings_layout.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -128,6 +131,12 @@ Future<void> initEnv(String appType) async {
   _registerEventHandler();
   // Update the system theme.
   updateSystemWindowTheme();
+  // Settings screen and remote toolbar: the layout of `settings_layout.json` and its builders, in this isolate.
+  if (isDesktop || isWebDesktop) {
+    registerSettingsPageBuilders();
+    registerSessionSettingsBuilders();
+    await SettingsLayout.reload();
+  }
 }
 
 void runMainApp(bool startService) async {

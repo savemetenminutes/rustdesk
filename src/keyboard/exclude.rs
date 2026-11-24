@@ -171,6 +171,55 @@ pub fn normalize_chord(s: &str) -> String {
     Chord::parse(s).map(|c| c.to_canonical()).unwrap_or_default()
 }
 
+/// The chord of keyboard-shortcut binding `b` (`shortcuts::Binding`, `{mods: [primary|ctrl|alt|shift], key}`) in the
+/// canonical exclude-list form, or "" when its key has no exclude-list name. `primary` is Ctrl, Cmd (= `Win`) on
+/// macOS. The key is matched through `shortcuts::event_to_key_name()`, the function that names a pressed key for
+/// the shortcut matcher.
+pub fn binding_to_chord(b: &super::shortcuts::Binding) -> String {
+    use super::shortcuts::Modifier;
+    let mut mods = 0u8;
+    for m in &b.mods {
+        mods |= match m {
+            Modifier::Primary => {
+                if cfg!(target_os = "macos") {
+                    MOD_WIN
+                } else {
+                    MOD_CTRL
+                }
+            }
+            Modifier::Ctrl => MOD_CTRL,
+            Modifier::Alt => MOD_ALT,
+            Modifier::Shift => MOD_SHIFT,
+        };
+    }
+    let key = KEY_NAMES.iter().map(|(_, k)| *k).find(|k| {
+        super::shortcuts::event_to_key_name(&make_event(*k, 0, 0, true)).as_deref() == Some(b.key.as_str())
+    });
+    match key {
+        Some(k) => Chord { mods, key: Some(k) }.to_canonical(),
+        None => String::new(),
+    }
+}
+
+/// The chords routed to a RustDesk action: `[(chord, binding)]` of the active keyboard-shortcut bindings
+/// (`shortcuts::current()`, empty while shortcuts are disabled or passed through), chords in canonical form.
+/// A chord also on a peer's exclude list runs on this PC: `on_hook_event()` diverts it before the shortcut matcher
+/// (`shortcuts::try_dispatch()`) sees it.
+pub fn shortcut_chords() -> Vec<(String, super::shortcuts::Binding)> {
+    let b = super::shortcuts::current();
+    if !b.enabled || b.pass_through {
+        return vec![];
+    }
+    b.bindings
+        .iter()
+        .filter(|x| !x.mods.is_empty())
+        .filter_map(|x| {
+            let c = binding_to_chord(x);
+            (!c.is_empty()).then(|| (c, x.clone()))
+        })
+        .collect()
+}
+
 /// Parses a comma-separated chord list; invalid entries are dropped, duplicates are kept once.
 pub fn parse_list(s: &str) -> Vec<Chord> {
     let mut res: Vec<Chord> = vec![];

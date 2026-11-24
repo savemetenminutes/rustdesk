@@ -162,6 +162,9 @@ pub const OPTION_ALLOW_SYNC_CLIPBOARD_BETWEEN_SESSIONS: &str =
     "allow-sync-clipboard-between-sessions";
 pub const OPTION_ALLOW_SYNC_CLIPBOARD_NESTED_SESSIONS: &str =
     "allow-sync-clipboard-nested-sessions";
+pub const OPTION_ALLOW_MONITOR_SWITCH_MAIN_TOOLBAR: &str = "allow-monitor-switch-main-toolbar";
+pub const OPTION_ALLOW_MONITOR_SWITCH_MIN_TOOLBAR: &str = "allow-monitor-switch-min-toolbar";
+pub const OPTION_ALLOW_FALLBACK_CURSOR: &str = "allow-fallback-cursor";
 
 pub const OPTION_PRINTER_INCOMING_JOB_ACTION: &str = "printer-incomming-job-action";
 pub const OPTION_PRINTER_ALLOW_AUTO_PRINT: &str = "allow-printer-auto-print";
@@ -254,6 +257,9 @@ pub const KEYS_LOCAL_SETTINGS: &[&str] = &[
     OPTION_ALLOW_REMOTE_CM_MODIFICATION,
     OPTION_ALLOW_SYNC_CLIPBOARD_BETWEEN_SESSIONS,
     OPTION_ALLOW_SYNC_CLIPBOARD_NESTED_SESSIONS,
+    OPTION_ALLOW_MONITOR_SWITCH_MAIN_TOOLBAR,
+    OPTION_ALLOW_MONITOR_SWITCH_MIN_TOOLBAR,
+    OPTION_ALLOW_FALLBACK_CURSOR,
     OPTION_ENABLE_CHECK_UPDATE,
     OPTION_PRINTER_INCOMING_JOB_ACTION,
     OPTION_PRINTER_ALLOW_AUTO_PRINT,

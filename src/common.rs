@@ -2492,7 +2492,43 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
     ThrottledInterval::new(i)
 }
 
+/// The fork's defaults for settings nobody has set: a peer's display settings (`DEFAULT_DISPLAY_SETTINGS`, read
+/// through `UserDefaultConfig`), this PC's client options (`DEFAULT_LOCAL_SETTINGS`) and its service options
+/// (`DEFAULT_SETTINGS`). Inserted before `custom.txt` is read, so a custom client's `default-settings` overrides
+/// them. A value saved in a config file overrides a default; saving a value equal to its default removes the key
+/// (`is_option_can_save()`).
+fn apply_fork_default_settings() {
+    let mut display = config::DEFAULT_DISPLAY_SETTINGS.write().unwrap();
+    for (k, v) in [
+        (keys::OPTION_VIEW_STYLE, "adaptive"),
+        (keys::OPTION_IMAGE_QUALITY, "best"),
+        (keys::OPTION_CODEC_PREFERENCE, "av1"),
+        (keys::OPTION_USE_ALL_MY_DISPLAYS_FOR_THE_REMOTE_SESSION, "Y"),
+        (keys::OPTION_DISPLAYS_AS_INDIVIDUAL_WINDOWS, "Y"),
+        (keys::OPTION_ENABLE_FILE_COPY_PASTE, "Y"),
+    ] {
+        display.insert(k.to_owned(), v.to_owned());
+    }
+    drop(display);
+    let mut local = config::DEFAULT_LOCAL_SETTINGS.write().unwrap();
+    for (k, v) in [
+        (keys::OPTION_THEME, "dark"),
+        (keys::OPTION_ALLOW_MONITOR_SWITCH_MAIN_TOOLBAR, "Y"),
+        (keys::OPTION_ALLOW_MONITOR_SWITCH_MIN_TOOLBAR, "Y"),
+        (keys::OPTION_ALLOW_SYNC_CLIPBOARD_BETWEEN_SESSIONS, "Y"),
+        (keys::OPTION_ALLOW_SYNC_CLIPBOARD_NESTED_SESSIONS, "Y"),
+    ] {
+        local.insert(k.to_owned(), v.to_owned());
+    }
+    drop(local);
+    config::DEFAULT_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_DIRECT_SERVER.to_owned(), "Y".to_owned());
+}
+
 pub fn load_custom_client() {
+    apply_fork_default_settings();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());

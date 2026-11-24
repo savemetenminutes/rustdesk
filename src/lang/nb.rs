@@ -836,5 +836,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Default for new sessions", ""),
         ("Saved for this remote PC", ""),
         ("Show the fallback cursor while the remote PC reports none", ""),
+        ("Display of this session", ""),
+        ("remote-microphone-saved-tip", ""),
     ].iter().cloned().collect();
 }

@@ -808,6 +808,12 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       BuildContext context, _ToolbarEdge edge, bool isHorizontal) {
     final List<Widget> toolbarItems = [];
     toolbarItems.add(_PinMenu(state: widget.state));
+    // The settings screen's categories, one dropdown each, in the screen's order (`DesktopSettingPage.tabKeys`):
+    // each shows the same page as the screen. A separator follows; then this session's own buttons.
+    for (final tab in DesktopSettingPage.tabKeys) {
+      toolbarItems.add(_SettingsCategoryMenu(tab: tab, ffi: widget.ffi));
+    }
+    toolbarItems.add(_ToolbarSeparator(isHorizontal: isHorizontal));
     toolbarItems.add(Obx(() {
       final privacyModeState = PrivacyModeState.find(widget.id);
       if ((privacyModeState.isEmpty ||
@@ -840,23 +846,12 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
     toolbarItems
         .add(_ControlMenu(id: widget.id, ffi: widget.ffi, state: widget.state));
-    // Every settings category of the settings screen has a dropdown here, in the screen's order. Display is
-    // `_DisplayMenu`: this session's display settings, then the Display category itself.
-    final settingsTabs = DesktopSettingPage.tabKeys;
-    final displayIndex = settingsTabs.indexOf(SettingsTabKey.display);
-    for (final tab in settingsTabs) {
-      if (tab == SettingsTabKey.display) break;
-      toolbarItems.add(_SettingsCategoryMenu(tab: tab, ffi: widget.ffi));
-    }
     toolbarItems.add(_DisplayMenu(
       id: widget.id,
       ffi: widget.ffi,
       state: widget.state,
       setFullscreen: _setFullscreen,
     ));
-    for (final tab in settingsTabs.skip(displayIndex < 0 ? settingsTabs.length : displayIndex + 1)) {
-      toolbarItems.add(_SettingsCategoryMenu(tab: tab, ffi: widget.ffi));
-    }
     // Do not show keyboard for camera connection type.
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
@@ -1800,17 +1795,6 @@ class _DisplayMenuState extends State<_DisplayMenu> {
         if (ffi.connType == ConnType.defaultConn) cursorToggles(),
         Divider(),
         toggles(),
-        // The Display category of the settings screen (defaults of every new session).
-        if (DesktopSettingPage.tabKeys.contains(SettingsTabKey.display)) ...[
-          Divider(),
-          _SubmenuButton(
-            ffi: widget.ffi,
-            child: Text(translate('Display Settings')),
-            menuChildren: [
-              _settingsCategoryPanel(context, SettingsTabKey.display)
-            ],
-          ),
-        ],
       ];
       // privacy mode
       final privacyModeState = PrivacyModeState.find(id);
@@ -1845,7 +1829,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
     }
 
     return _IconSubmenuButton(
-      tooltip: 'Display Settings',
+      tooltip: 'Display of this session',
       svg: "assets/display.svg",
       ffi: widget.ffi,
       color: _ToolbarTheme.blueColor,
@@ -2070,49 +2054,6 @@ class _DisplayMenuState extends State<_DisplayMenu> {
                   e.actionId == kShortcutActionToggleMute))
               .toList();
           if (v.isEmpty) return Offstage();
-          // "Sync clipboard between sessions" (local option `allow-sync-clipboard-between-sessions`, also in
-          // Settings → General) sits indented under "Disable clipboard": a clipboard received from one session is
-          // forwarded to the other sessions, which needs this session's clipboard enabled; disabled, the entry is
-          // greyed out.
-          Widget syncClipboard(bool clipboardDisabled) => Padding(
-                padding: const EdgeInsets.only(left: 24),
-                child: CkbMenuButton(
-                    value: bind.mainGetLocalOption(
-                            key: kOptionAllowSyncClipboardBetweenSessions) ==
-                        'Y',
-                    onChanged: clipboardDisabled ||
-                            isOptionFixed(kOptionAllowSyncClipboardBetweenSessions) == true
-                        ? null
-                        : (value) {
-                            if (value == null) return;
-                            bind.mainSetLocalOption(
-                                key: kOptionAllowSyncClipboardBetweenSessions,
-                                value: value ? 'Y' : 'N');
-                          },
-                    child: Text(translate('Sync clipboard between sessions')),
-                    ffi: ffi),
-              );
-          // "Sync clipboard with nested sessions" (local option `allow-sync-clipboard-nested-sessions`, also in
-          // Settings → General): a clipboard this PC's server side wrote is sent to this session's peer, and one this
-          // session wrote is sent to the controllers of this PC (`ClipboardContext::get_formats_filter()`).
-          Widget nestedClipboard(bool clipboardDisabled) => Padding(
-                padding: const EdgeInsets.only(left: 24),
-                child: CkbMenuButton(
-                    value: bind.mainGetLocalOption(
-                            key: kOptionAllowSyncClipboardNestedSessions) ==
-                        'Y',
-                    onChanged: clipboardDisabled ||
-                            isOptionFixed(kOptionAllowSyncClipboardNestedSessions) == true
-                        ? null
-                        : (value) {
-                            if (value == null) return;
-                            bind.mainSetLocalOption(
-                                key: kOptionAllowSyncClipboardNestedSessions,
-                                value: value ? 'Y' : 'N');
-                          },
-                    child: Text(translate('Sync clipboard with nested sessions')),
-                    ffi: ffi),
-              );
           return Column(children: [
             for (final e in v) ...[
               // Peer config toggles, displays as individual windows and use all my displays are saved for the
@@ -2124,10 +2065,6 @@ class _DisplayMenuState extends State<_DisplayMenu> {
                       ? e.child
                       : _savedForPeer(e.child),
                   ffi: ffi),
-              if (e.actionId == kShortcutActionToggleDisableClipboard) ...[
-                syncClipboard(e.value),
-                nestedClipboard(e.value),
-              ],
             ],
           ]);
         });
@@ -2655,7 +2592,7 @@ class _KeyboardMenu extends StatelessWidget {
           .map((e) => CkbMenuButton(
               value: e.value,
               onChanged: e.onChanged,
-              child: e.child,
+              child: e.savedForPeer ? _savedForPeer(e.child) : e.child,
               ffi: ffi) as Widget)
           .toList();
       if (toggles.isNotEmpty) {
@@ -2685,7 +2622,8 @@ class _KeyboardMenu extends StatelessWidget {
               // The exclude list is applied in the keyboard grab hook, which input source 2 does not use.
               if (isWindows && !ffi.ffiModel.viewOnly && !isInputSourceFlutter)
                 MenuButton(
-                  child: Text(translate('Shortcuts sent to the remote PC'))
+                  child: _savedForPeer(
+                          Text(translate('Shortcuts sent to the remote PC')))
                       .paddingOnly(left: 26.0),
                   onPressed: () => keyboardExcludeShortcutsDialog(ffi),
                   ffi: ffi,
@@ -2763,7 +2701,7 @@ class _KeyboardMenu extends StatelessWidget {
           text = '$text beta';
         }
         list.add(RdoMenuButton<String>(
-          child: Text(text),
+          child: _savedForPeer(Text(text)),
           value: mode.key,
           groupValue: groupValue,
           onChanged: enabled ? onChanged : null,
@@ -2851,7 +2789,7 @@ class _KeyboardMenu extends StatelessWidget {
               }
             : null,
         ffi: ffi,
-        child: Text(translate('View Mode')));
+        child: _savedForPeer(Text(translate('View Mode'))));
   }
 
   showMyCursor() {
@@ -2878,7 +2816,7 @@ class _KeyboardMenu extends StatelessWidget {
               }
             },
             ffi: ffi,
-            child: Text(translate('Show my cursor')))
+            child: _savedForPeer(Text(translate('Show my cursor'))))
         .paddingOnly(left: 26.0);
   }
 
@@ -3918,6 +3856,26 @@ class _SettingsCategoryMenu extends StatelessWidget {
       hoverColor: _ToolbarTheme.hoverBlueColor,
       menuChildrenGetter: (_) => [_settingsCategoryPanel(context, tab)],
     );
+  }
+}
+
+/// Separator between the settings-screen category buttons and the session's own buttons: a thin line across the
+/// toolbar's flow direction.
+class _ToolbarSeparator extends StatelessWidget {
+  final bool isHorizontal;
+  const _ToolbarSeparator({Key? key, required this.isHorizontal})
+      : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final length = _ToolbarTheme.buttonSize * 0.7;
+    return Container(
+      width: isHorizontal ? 1 : length,
+      height: isHorizontal ? length : 1,
+      color: Theme.of(context).dividerColor,
+    ).marginSymmetric(
+        horizontal: isHorizontal ? _ToolbarTheme.buttonHMargin * 2 : 0,
+        vertical: isHorizontal ? 0 : _ToolbarTheme.buttonHMargin * 2);
   }
 }
 

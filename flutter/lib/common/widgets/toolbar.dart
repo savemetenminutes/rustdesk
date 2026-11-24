@@ -201,11 +201,14 @@ class TToggleMenu {
   final bool value;
   final ValueChanged<bool?>? onChanged;
   final String? actionId;
+  /// The toggle is stored in the peer's config: the next connection to the peer starts with it.
+  final bool savedForPeer;
   TToggleMenu(
       {required this.child,
       required this.value,
       required this.onChanged,
-      this.actionId});
+      this.actionId,
+      this.savedForPeer = false});
 }
 
 /// Register each tagged entry's `onChanged` with the session [ShortcutModel].
@@ -1345,6 +1348,7 @@ List<TToggleMenu> toolbarKeyboardToggles(FFI ffi) {
     v.add(TToggleMenu(
         value: value,
         actionId: kShortcutActionToggleSwapCtrlCmd,
+        savedForPeer: true,
         onChanged: enabled ? onChanged : null,
         child: Text(translate('Swap control-command key'))));
   }
@@ -1393,6 +1397,7 @@ List<TToggleMenu> toolbarKeyboardToggles(FFI ffi) {
     final enabled = !ffi.ffiModel.viewOnly;
     v.add(TToggleMenu(
         value: optionValue == 'Y',
+        savedForPeer: true,
         onChanged: enabled ? onChanged : null,
         child: Text(translate('Reverse mouse wheel'))));
   }
@@ -1411,6 +1416,7 @@ List<TToggleMenu> toolbarKeyboardToggles(FFI ffi) {
     v.add(TToggleMenu(
         value: value,
         actionId: kShortcutActionToggleSwapLeftRightMouse,
+        savedForPeer: true,
         onChanged: enabled ? onChanged : null,
         child: Text(translate('swap-left-right-mouse'))));
   }

@@ -410,15 +410,27 @@ void audioDevicesDialog(FFI ffi) async {
                   color: Theme.of(context).textTheme.bodySmall?.color)),
         );
 
-    Widget heading(String text) => Padding(
+    // A section whose settings are stored per peer shows a floppy glyph after its title; `saved` is its tooltip.
+    Widget heading(String text, {String? saved}) => Padding(
           padding: const EdgeInsets.only(top: 8, bottom: 4),
-          child: Text(text, style: TextStyle(fontWeight: FontWeight.bold)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(
+                child: Text(text,
+                    style: TextStyle(fontWeight: FontWeight.bold))),
+            if (saved != null) ...[
+              const SizedBox(width: 6),
+              Tooltip(
+                  message: saved,
+                  child: const Icon(Icons.save_outlined, size: 14)),
+            ],
+          ]),
         );
+    final savedForPeer = _t('Saved for this remote PC');
 
     // Output on this PC. The volume belongs to the device that plays ("Windows default" resolves to one).
     final playingOutput = (volumes['playing_output'] as String?) ?? '';
     final outputGroup = <Widget>[
-      heading(_t('Output on this PC')),
+      heading(_t('Output on this PC'), saved: savedForPeer),
       radio(_t('Windows default (follows changes)'), '', output, setOutput,
           whenSelected: [
             if (playingOutput.isNotEmpty) note(_t('Playing on "{}"', playingOutput)),
@@ -435,7 +447,8 @@ void audioDevicesDialog(FFI ffi) async {
     // Microphone of the remote PC: its recording devices; the selection is its default recording device.
     final r = remote;
     final virtualMic = r?.virtualMicrophone ?? '';
-    final List<Widget> remoteMicGroup = [heading(_t('Microphone of the remote PC'))];
+    final List<Widget> remoteMicGroup = [heading(_t('Microphone of the remote PC'),
+        saved: _t('remote-microphone-saved-tip'))];
     if (r == null) {
       remoteMicGroup.add(note(fetchDone
           ? _t('The remote PC did not list its devices (it needs a newer RustDesk)')
@@ -545,7 +558,8 @@ void audioDevicesDialog(FFI ffi) async {
             }),
         ];
     final hostGroup = <Widget>[
-      heading(_t('Microphone of this PC (sent to the remote PC)')),
+      heading(_t('Microphone of this PC (sent to the remote PC)'),
+          saved: savedForPeer),
       radio(_t('None'), '', hostInput, setHostInput),
       ...hostInputs.map((d) => radio(d, d, hostInput, setHostInput,
           whenSelected: hostDeviceControls(d))),
@@ -557,7 +571,8 @@ void audioDevicesDialog(FFI ffi) async {
 
     // Sound you hear from the remote PC: what the remote PC captures and sends to this PC.
     final List<Widget> hearGroup = [
-      heading(_t('Sound you hear from the remote PC (captured there)'))
+      heading(_t('Sound you hear from the remote PC (captured there)'),
+          saved: savedForPeer)
     ];
     if (r == null) {
       hearGroup.add(radio(_t("Remote PC's own setting"), '', input, setInput,

@@ -3224,7 +3224,10 @@ class _SettingsCategoryMenu extends StatelessWidget {
       menuChildrenGetter: (_) {
         final height =
             (MediaQuery.of(context).size.height * 0.8).clamp(240.0, 760.0);
-        final width = category.hasColumns ? 860.0 : 560.0;
+        // A table category gets up to 90 % of the window; columns wider than that scroll sideways in the page.
+        final width = category.hasColumns
+            ? (MediaQuery.of(context).size.width * 0.9).clamp(560.0, 1400.0)
+            : 560.0;
         return [
           SizedBox(
               width: width,

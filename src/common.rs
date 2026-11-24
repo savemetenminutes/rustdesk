@@ -2501,6 +2501,7 @@ fn apply_fork_default_settings() {
     let mut display = config::DEFAULT_DISPLAY_SETTINGS.write().unwrap();
     for (k, v) in [
         (keys::OPTION_VIEW_STYLE, "adaptive"),
+        (keys::OPTION_SCROLL_STYLE, "scrollbar"),
         (keys::OPTION_IMAGE_QUALITY, "best"),
         (keys::OPTION_CODEC_PREFERENCE, "av1"),
         (keys::OPTION_USE_ALL_MY_DISPLAYS_FOR_THE_REMOTE_SESSION, "Y"),

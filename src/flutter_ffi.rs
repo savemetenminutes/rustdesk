@@ -1170,6 +1170,12 @@ pub fn main_take_recorded_keyboard_shortcut() -> SyncReturn<String> {
     SyncReturn("".to_owned())
 }
 
+/// Evaluates a `settings_layout.json` expression (`settings_expr::eval()`): `expr` with the scope of `ctx_json`
+/// (`peer`, `in_session`, `display`, `value`); returns `{"ok": <value>}` or `{"error": "<message>"}`.
+pub fn main_eval_settings_expr(expr: String, ctx_json: String) -> SyncReturn<String> {
+    SyncReturn(crate::settings_expr::eval(&expr, &ctx_json))
+}
+
 /// The chords bound to RustDesk actions by the keyboard-shortcut bindings, as JSON
 /// `[{"chord", "binding": {"action", "mods", "key"}}, ...]` with chords in the canonical exclude-list form
 /// (`exclude::shortcut_chords()`), for the chord routing dialog.

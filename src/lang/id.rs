@@ -869,5 +869,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Saved session-specific", ""),
         ("Saved per screen", ""),
         ("Audio devices", ""),
+        ("Setting", ""),
+        ("expression errors", ""),
     ].iter().cloned().collect();
 }

@@ -1589,6 +1589,10 @@ class RustdeskImpl {
 
   String mainKeyboardShortcutChords({dynamic hint}) => '[]';
 
+  String mainEvalSettingsExpr(
+          {required String expr, required String ctxJson, dynamic hint}) =>
+      '{"error": "not available on the web"}';
+
   String mainSettingsLayout({dynamic hint}) => '';
 
   String mainSettingsLayoutPath({dynamic hint}) => '';

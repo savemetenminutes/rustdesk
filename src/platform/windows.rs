@@ -208,6 +208,16 @@ pub fn get_cursor() -> ResultType<Option<u64>> {
             return Err(io::Error::last_os_error().into());
         }
         if ci.flags & CURSOR_SHOWING == 0 {
+            // Windows hides the cursor of a PC without a mouse (`SM_MOUSEPRESENT` 0), also while a controller
+            // moves it; the controller then had no shape and drew its default cursor. Such a PC reports the
+            // system arrow. A cursor an application hides while a mouse is present stays hidden.
+            use winapi::um::winuser::{GetSystemMetrics, LoadCursorW, IDC_ARROW, SM_MOUSEPRESENT};
+            if GetSystemMetrics(SM_MOUSEPRESENT) == 0 {
+                let arrow = LoadCursorW(std::ptr::null_mut(), IDC_ARROW);
+                if !arrow.is_null() {
+                    return Ok(Some(arrow as _));
+                }
+            }
             Ok(None)
         } else {
             Ok(Some(ci.hCursor as _))

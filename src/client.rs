@@ -3372,12 +3372,14 @@ impl LoginConfigHandler {
                 .get(&name)
                 .map(|o| !o.is_empty())
                 .unwrap_or(false);
+            // `config` is the peer file as it is now; storing `self.config` (this session's copy from its start) would
+            // put back every value another window of the same peer saved since, e.g. `ui_flutter.display_windows`.
             if is_set {
-                self.config.options.remove(&name);
+                config.options.remove(&name);
             } else {
-                self.config.options.insert(name, "Y".to_owned());
+                config.options.insert(name, "Y".to_owned());
             }
-            self.config.store(&self.id);
+            self.save_config(config);
             return None;
         }
 

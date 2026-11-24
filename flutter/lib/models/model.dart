@@ -2447,6 +2447,47 @@ class CanvasModel with ChangeNotifier {
 
   CanvasModel(this.parent) {
     sessionId = parent.target!.sessionId;
+    _horizontal.addListener(() => _watchScroll(_horizontal, true));
+    _vertical.addListener(() => _watchScroll(_vertical, false));
+  }
+
+  // Scroll diagnostics (`[display_windows] scroll …` lines): the last cause that re-laid out the canvas, set by
+  // `_layoutCause()`, and the last offset of each scroll view, so that a jump of an offset to 0 is logged with
+  // the cause that preceded it.
+  String _lastLayoutCause = 'none';
+  DateTime _lastLayoutCauseAt = DateTime.fromMillisecondsSinceEpoch(0);
+  double _lastScrollPixelsX = 0;
+  double _lastScrollPixelsY = 0;
+
+  String get _scrollTag =>
+      'peer=${parent.target?.id} display=${parent.target?.ffiModel.pi.currentDisplay}';
+
+  /// Records `cause` as the latest re-layout of the canvas; logged when the scroll view holds an offset that the
+  /// re-layout may lose.
+  void _layoutCause(String cause) {
+    _lastLayoutCause = cause;
+    _lastLayoutCauseAt = DateTime.now();
+    if (_lastScrollPixelsX > 0.5 || _lastScrollPixelsY > 0.5) {
+      displayWindowsLog('scroll layout $_scrollTag cause=$cause '
+          'offset=$_lastScrollPixelsX,$_lastScrollPixelsY');
+    }
+  }
+
+  void _watchScroll(ScrollController c, bool horizontal) {
+    if (!c.hasClients) return;
+    final pixels = c.position.pixels;
+    final previous = horizontal ? _lastScrollPixelsX : _lastScrollPixelsY;
+    if (previous > 1 && pixels <= 0.5) {
+      final ago = DateTime.now().difference(_lastLayoutCauseAt).inMilliseconds;
+      _traceScroll('RESET axis=${horizontal ? 'x' : 'y'} '
+          '$previous -> $pixels max=${c.position.maxScrollExtent} '
+          'lastCause=$_lastLayoutCause ${ago}ms ago restorePending=$scrollRestorePending');
+    }
+    if (horizontal) {
+      _lastScrollPixelsX = pixels;
+    } else {
+      _lastScrollPixelsY = pixels;
+    }
   }
 
   double get x => _x;
@@ -2467,18 +2508,62 @@ class CanvasModel with ChangeNotifier {
 
   _resetScroll() => setScrollPercent(0.0, 0.0);
 
+  /// The only writer of `_scrollX` / `_scrollY`: a changed value is logged with the call stack (`_traceScroll()`).
   void setScrollPercent(double x, double y) {
-    _scrollX = x.isFinite ? x : 0.0;
-    _scrollY = y.isFinite ? y : 0.0;
+    final nx = x.isFinite ? x : 0.0;
+    final ny = y.isFinite ? y : 0.0;
+    if (nx != _scrollX || ny != _scrollY) {
+      _traceScroll('percent $_scrollX,$_scrollY -> $nx,$ny');
+    }
+    _scrollX = nx;
+    _scrollY = ny;
+  }
+
+  /// The only place code moves a scroll view: `c.jumpTo(pixels)`, logged with the call stack.
+  void _jumpScroll(ScrollController c, double pixels, String why) {
+    if (!c.hasClients) return;
+    final axis = identical(c, _horizontal) ? 'x' : 'y';
+    if ((c.position.pixels - pixels).abs() > 0.5) {
+      _traceScroll('jump $axis ${c.position.pixels} -> $pixels ($why)');
+    }
+    c.jumpTo(pixels);
+  }
+
+  // Identical consecutive traces within 1 s are counted instead of logged (user scrolling emits a stream).
+  String _lastTraceStack = '';
+  DateTime _lastTraceAt = DateTime.fromMillisecondsSinceEpoch(0);
+  int _repeatedTraces = 0;
+
+  /// Logs a scroll write `what` of this canvas with the caller chain (`StackTrace.current`, the frames above this
+  /// method), as `[display_windows] scroll set …`.
+  void _traceScroll(String what) {
+    final stack = StackTrace.current
+        .toString()
+        .split('\n')
+        .where((l) => l.trim().isNotEmpty)
+        .skip(2)
+        .take(10)
+        .map((l) => l.replaceAll(RegExp(r'\s+'), ' ').trim())
+        .join(' <- ');
+    final now = DateTime.now();
+    if (stack == _lastTraceStack &&
+        now.difference(_lastTraceAt).inMilliseconds < 1000) {
+      _repeatedTraces++;
+      _lastTraceAt = now;
+      return;
+    }
+    if (_repeatedTraces > 0) {
+      displayWindowsLog('scroll set $_scrollTag (previous trace repeated $_repeatedTraces more times)');
+      _repeatedTraces = 0;
+    }
+    _lastTraceStack = stack;
+    _lastTraceAt = now;
+    displayWindowsLog('scroll set $_scrollTag $what | $stack');
   }
 
   void pushScrollPositionToUI(double scrollPixelX, double scrollPixelY) {
-    if (_horizontal.hasClients) {
-      _horizontal.jumpTo(scrollPixelX);
-    }
-    if (_vertical.hasClients) {
-      _vertical.jumpTo(scrollPixelY);
-    }
+    _jumpScroll(_horizontal, scrollPixelX, 'pushScrollPositionToUI');
+    _jumpScroll(_vertical, scrollPixelY, 'pushScrollPositionToUI');
   }
 
   /// True from `restoreScrollOffset()` until the restored offsets have held for `_kScrollSettle` or the user scrolls
@@ -2533,14 +2618,14 @@ class CanvasModel with ChangeNotifier {
       if (x != null && _horizontal.hasClients) {
         final target = x.clamp(0.0, _horizontal.position.maxScrollExtent);
         if ((_horizontal.offset - target).abs() > 0.5) {
-          _horizontal.jumpTo(target);
+          _jumpScroll(_horizontal, target, 'restoreScrollOffset');
           moved = true;
         }
       }
       if (y != null && _vertical.hasClients) {
         final target = y.clamp(0.0, _vertical.position.maxScrollExtent);
         if ((_vertical.offset - target).abs() > 0.5) {
-          _vertical.jumpTo(target);
+          _jumpScroll(_vertical, target, 'restoreScrollOffset');
           moved = true;
         }
       }
@@ -2649,6 +2734,10 @@ class CanvasModel with ChangeNotifier {
         style != kRemoteViewStyleCustom) {
       return;
     }
+    _layoutCause('updateViewStyle style=${_lastViewStyle.style}->${viewStyle.style} '
+        'view=${_lastViewStyle.width.round()}x${_lastViewStyle.height.round()}->${viewStyle.width.round()}x${viewStyle.height.round()} '
+        'display=${_lastViewStyle.displayWidth}x${_lastViewStyle.displayHeight}->${viewStyle.displayWidth}x${viewStyle.displayHeight} '
+        'dpr=$_devicePixelRatio->${ui.window.devicePixelRatio}');
     if (_lastViewStyle.style != viewStyle.style) {
       _resetScroll();
     }
@@ -2703,6 +2792,7 @@ class CanvasModel with ChangeNotifier {
       return;
     }
 
+    _layoutCause('tryUpdateScrollStyle style=$style');
     _resetScroll();
 
     Future.delayed(duration, () async {
@@ -2717,6 +2807,7 @@ class CanvasModel with ChangeNotifier {
 
     _scrollStyle =
         style != null ? ScrollStyle.fromString(style) : ScrollStyle.scrollauto;
+    _layoutCause('updateScrollStyle style=$style');
 
     if (_scrollStyle != ScrollStyle.scrollauto) {
       // Scrollbar and Scroll Edge share controllers and retain their positions.
@@ -2959,6 +3050,7 @@ class CanvasModel with ChangeNotifier {
   }
 
   resetOffset() {
+    _layoutCause('resetOffset');
     if (isWebDesktop) {
       updateViewStyle();
     } else {

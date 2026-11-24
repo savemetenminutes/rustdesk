@@ -162,7 +162,14 @@ void storeDisplayWindow(String arguments) {
         m = jsonDecode(raw) as Map<String, dynamic>;
       } catch (_) {}
     }
-    m['$display'] = state.toJson();
+    final before = m['$display'] is Map ? m['$display'] as Map : const {};
+    final after = state.toJson();
+    if (before['scrollX'] != after['scrollX'] ||
+        before['scrollY'] != after['scrollY']) {
+      displayWindowsLog('store scroll peer=$peerId display=$display '
+          '${before['scrollX']},${before['scrollY']} -> ${after['scrollX']},${after['scrollY']}');
+    }
+    m['$display'] = after;
     bind.mainSetPeerFlutterOptionSync(
         id: peerId, k: kPeerOptionDisplayWindows, v: jsonEncode(m));
   } catch (e) {

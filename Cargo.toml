@@ -292,7 +292,10 @@ osx_minimum_system_version = "10.14"
 lto = true
 codegen-units = 1
 panic = 'abort'
-strip = true
+# Line tables in a separate `.pdb` (MSVC): a memory dump of a hung or crashed process resolves to functions and
+# source lines. The `.pdb` stays in `target/release` and is not part of the deployed folder.
+strip = false
+debug = "line-tables-only"
 #opt-level = 'z' # only have smaller size after strip
 rpath = true
 
